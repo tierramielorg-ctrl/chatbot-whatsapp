@@ -1,9 +1,13 @@
 require("dotenv").config();
+const path = require("path");
 const express = require("express");
 const whatsapp = require("./whatsapp");
 const claudeAgent = require("./claudeAgent");
 
 const app = express();
+
+// Pagina publica de politica de privacidad (requerida por Meta para publicar la app)
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 // Guardamos el rawBody para poder verificar la firma X-Hub-Signature-256
 app.use(
