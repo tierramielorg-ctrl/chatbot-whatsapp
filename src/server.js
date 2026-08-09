@@ -26,20 +26,6 @@ app.get("/health", (_req, res) => res.status(200).send("ok"));
 app.get("/shopify/install", shopifyAuth.install);
 app.get("/shopify/callback", shopifyAuth.callback);
 
-// TEMPORAL: para diagnosticar problemas de variables de entorno. Solo expone
-// longitud y ultimos caracteres, nunca el valor completo. Borrar despues de usar.
-app.get("/shopify/debug-env", (_req, res) => {
-  const id = process.env.SHOPIFY_CLIENT_ID || "";
-  const secret = process.env.SHOPIFY_CLIENT_SECRET || "";
-  res.json({
-    clientId_length: id.length,
-    clientId_last6: id.slice(-6),
-    clientSecret_length: secret.length,
-    clientSecret_last6: secret.slice(-6),
-    clientSecret_startsWithShpss: secret.startsWith("shpss_"),
-  });
-});
-
 // Meta llama este GET una vez, al configurar el webhook en el panel de la app.
 app.get("/webhook", (req, res) => {
   const challenge = whatsapp.verifyWebhook(req.query);
