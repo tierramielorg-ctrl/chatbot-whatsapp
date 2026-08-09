@@ -3,6 +3,7 @@ const path = require("path");
 const express = require("express");
 const whatsapp = require("./whatsapp");
 const claudeAgent = require("./claudeAgent");
+const shopifyAuth = require("./shopifyAuth");
 
 const app = express();
 
@@ -19,6 +20,11 @@ app.use(
 );
 
 app.get("/health", (_req, res) => res.status(200).send("ok"));
+
+// Flujo unico de instalacion OAuth para obtener el Admin API access token de Shopify.
+// Uso: abrir /shopify/install?shop=tu-tienda.myshopify.com en el navegador (logueado en Shopify).
+app.get("/shopify/install", shopifyAuth.install);
+app.get("/shopify/callback", shopifyAuth.callback);
 
 // Meta llama este GET una vez, al configurar el webhook en el panel de la app.
 app.get("/webhook", (req, res) => {
