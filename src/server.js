@@ -84,6 +84,15 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// TEMPORAL: diagnostico rapido de env vars. Borrar despues de usar.
+app.get("/debug-env-check", (_req, res) => {
+  const check = (name) => {
+    const v = process.env[name] || "";
+    return { length: v.length, last6: v.slice(-6) };
+  };
+  res.json({ RESEND_API_KEY: check("RESEND_API_KEY") });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Tierra Miel WhatsApp bot escuchando en el puerto ${PORT}`);
