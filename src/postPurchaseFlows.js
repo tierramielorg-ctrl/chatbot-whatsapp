@@ -12,6 +12,7 @@ const { productNeedsPersonalization } = require("./knowledge/personalization");
 const TEMPLATE_PERSONALIZATION = process.env.WHATSAPP_TEMPLATE_PERSONALIZATION || "tierra_miel_personalizacion";
 const TEMPLATE_USAGE = process.env.WHATSAPP_TEMPLATE_USAGE || "tierra_miel_modo_de_uso";
 const TEMPLATE_TRACKING = process.env.WHATSAPP_TEMPLATE_TRACKING || "tierra_miel_seguimiento";
+const TEMPLATE_WELCOME = process.env.WHATSAPP_TEMPLATE_WELCOME || "tierra_miel_bienvenida";
 const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es";
 
 /** Normaliza un telefono de Shopify (+56 9 1234 5678, etc) al formato que pide WhatsApp (sin +, sin espacios). */
@@ -40,6 +41,27 @@ function businessDaysForProvince(province) {
 }
 
 /**
+ * Manda un mensaje de bienvenida calido para pedidos que no necesitan preguntas
+ * de personalizacion (ej: miel, polen, jabones) - asi el cliente igual siente
+ * la cercania de un WhatsApp real, no solo el email automatico de Shopify.
+ */
+async function sendWelcomeMessage(order) {
+  const phone = normalizePhone(order.phone);
+  if (!phone) {
+    await shopify.addOrderTags(order.id, ["tm-sin-telefono"]);
+    return;
+  }
+  const firstName = (order.customerName || "").split(" ")[0] || "";
+  const sent = await whatsapp.sendTemplateMessage(phone, TEMPLATE_WELCOME, TEMPLATE_LANG, [firstName, order.name]);
+  if (!sent) {
+    console.error(`Pedido ${order.name}: fallo el envio de la plantilla de bienvenida.`);
+    return;
+  }
+  await shopify.addOrderTags(order.id, ["tm-bienvenida-enviada"]);
+  console.log(`Pedido ${order.name}: plantilla de bienvenida enviada a ${phone}.`);
+}
+
+/**
  * Se llama cuando llega el webhook orders/create (o orders/paid) de Shopify.
  * Si el pedido tiene productos que necesitan personalizacion, manda la plantilla
  * de apertura y deja la conversacion de ese telefono en modo "personalization".
@@ -54,7 +76,8 @@ async function handleOrderCreated(orderPayload) {
 
   const needsFlow = order.lineItems.some((li) => productNeedsPersonalization(li.title));
   if (!needsFlow) {
-    console.log(`Pedido ${order.name}: ningun producto requiere personalizacion, se omite.`);
+    console.log(`Pedido ${order.name}: ningun producto requiere personalizacion, se manda bienvenida.`);
+    await sendWelcomeMessage(order);
     return;
   }
 
