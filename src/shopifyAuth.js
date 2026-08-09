@@ -29,7 +29,9 @@ function install(req, res) {
   }
 
   lastState = crypto.randomBytes(16).toString("hex");
-  const redirectUri = `${req.protocol}://${req.get("host")}/shopify/callback`;
+  // Forzamos https: Render termina TLS en su proxy y req.protocol reporta "http"
+  // aqui adentro, lo que rompe la comparacion exacta que hace Shopify del redirect_uri.
+  const redirectUri = `https://${req.get("host")}/shopify/callback`;
 
   const authorizeUrl =
     `https://${shop}/admin/oauth/authorize` +
