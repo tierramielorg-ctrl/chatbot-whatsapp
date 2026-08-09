@@ -84,51 +84,6 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// TEMPORAL: chequeo rapido de cuales variables de plantilla estan configuradas.
-app.get("/debug-template-vars", (_req, res) => {
-  res.json({
-    WHATSAPP_TEMPLATE_PERSONALIZATION: process.env.WHATSAPP_TEMPLATE_PERSONALIZATION || null,
-    WHATSAPP_TEMPLATE_USAGE: process.env.WHATSAPP_TEMPLATE_USAGE || null,
-    WHATSAPP_TEMPLATE_WELCOME: process.env.WHATSAPP_TEMPLATE_WELCOME || null,
-    WHATSAPP_TEMPLATE_TRACKING: process.env.WHATSAPP_TEMPLATE_TRACKING || null,
-    WHATSAPP_TEMPLATE_LANG: process.env.WHATSAPP_TEMPLATE_LANG || null,
-  });
-});
-
-// TEMPORAL: diagnostico del envio de plantilla. Borrar despues de usar.
-app.get("/debug-send-test", async (req, res) => {
-  const whatsapp = require("./whatsapp");
-  const to = req.query.to;
-  const templateName = req.query.template || process.env.WHATSAPP_TEMPLATE_PERSONALIZATION;
-  const lang = process.env.WHATSAPP_TEMPLATE_LANG || "(no configurado, usando default 'es')";
-  try {
-    const result = await fetch(
-      `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION || "v20.0"}/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to,
-          type: "template",
-          template: {
-            name: templateName,
-            language: { code: process.env.WHATSAPP_TEMPLATE_LANG || "es" },
-            components: [{ type: "body", parameters: [{ type: "text", text: "DebugTest" }] }],
-          },
-        }),
-      }
-    );
-    const body = await result.json();
-    res.json({ usedLang: lang, templateName, httpStatus: result.status, response: body });
-  } catch (err) {
-    res.json({ error: err.message });
-  }
-});
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Tierra Miel WhatsApp bot escuchando en el puerto ${PORT}`);
