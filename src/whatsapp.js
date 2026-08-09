@@ -88,6 +88,71 @@ async function sendTextMessage(to, text) {
   return res.ok;
 }
 
+/**
+ * Manda un mensaje de plantilla aprobada por Meta (necesario para iniciar una
+ * conversacion cuando el negocio escribe primero, ej. confirmacion de pedido).
+ * variables: array de strings que llenan los {{1}}, {{2}}, etc del body de la plantilla.
+ */
+async function sendTemplateMessage(to, templateName, languageCode, variables = []) {
+  const res = await fetch(
+    `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "template",
+        template: {
+          name: templateName,
+          language: { code: languageCode || "es" },
+          components: variables.length
+            ? [
+                {
+                  type: "body",
+                  parameters: variables.map((v) => ({ type: "text", text: String(v) })),
+                },
+              ]
+            : undefined,
+        },
+      }),
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("Error enviando plantilla de WhatsApp:", res.status, errText);
+  }
+  return res.ok;
+}
+
+/** Manda un audio (nota de voz) desde una URL publica (mp3/ogg/etc soportado por WhatsApp). */
+async function sendAudioMessage(to, audioUrl) {
+  const res = await fetch(
+    `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "audio",
+        audio: { link: audioUrl },
+      }),
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("Error enviando audio de WhatsApp:", res.status, errText);
+  }
+  return res.ok;
+}
+
 async function markAsRead(messageId) {
   try {
     await fetch(
@@ -115,5 +180,7 @@ module.exports = {
   verifySignature,
   parseIncomingMessage,
   sendTextMessage,
+  sendTemplateMessage,
+  sendAudioMessage,
   markAsRead,
 };

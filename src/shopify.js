@@ -149,4 +149,151 @@ async function getCustomerOrders(identifier, limit = 5) {
   }));
 }
 
-module.exports = { searchProducts, getOrderStatus, getCustomerOrders };
+/** Trae una orden completa (line items, direccion de envio, telefono, tags) por su nombre (ej "1310"). */
+async function getOrderForAutomation(orderNumber) {
+  const cleaned = String(orderNumber).replace("#", "").trim();
+  const query = `
+    query OrderFull($q: String!) {
+      orders(first: 1, query: $q) {
+        edges {
+          node {
+            id
+            name
+            note
+            tags
+            phone
+            customer { firstName lastName phone email }
+            shippingAddress { province provinceCode countryCodeV2 phone }
+            lineItems(first: 20) {
+              edges { node { title quantity variant { product { handle } } } }
+            }
+          }
+        }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(query, { q: `name:${cleaned}` });
+  const edge = data.orders.edges[0];
+  if (!edge) return null;
+  const o = edge.node;
+  return {
+    id: o.id,
+    name: o.name,
+    note: o.note,
+    tags: o.tags,
+    phone: o.phone || o.customer?.phone || o.shippingAddress?.phone || null,
+    customerName: [o.customer?.firstName, o.customer?.lastName].filter(Boolean).join(" "),
+    email: o.customer?.email || null,
+    province: o.shippingAddress?.province || null,
+    lineItems: o.lineItems.edges.map(({ node }) => ({
+      title: node.title,
+      quantity: node.quantity,
+      handle: node.variant?.product?.handle || null,
+    })),
+  };
+}
+
+/** Agrega texto a la nota de un pedido (sin borrar lo que ya habia). */
+async function appendOrderNote(orderId, textToAppend) {
+  const getQuery = `query($id: ID!) { order(id: $id) { note } }`;
+  const current = await shopifyGraphQL(getQuery, { id: orderId });
+  const existing = current.order?.note || "";
+  const newNote = existing ? `${existing}\n---\n${textToAppend}` : textToAppend;
+
+  const mutation = `
+    mutation($input: OrderInput!) {
+      orderUpdate(input: $input) {
+        order { id note }
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(mutation, { input: { id: orderId, note: newNote } });
+  const errors = data.orderUpdate.userErrors;
+  if (errors?.length) throw new Error(`Shopify orderUpdate error: ${JSON.stringify(errors)}`);
+  return data.orderUpdate.order;
+}
+
+/** Agrega tags a un pedido (no reemplaza los existentes). */
+async function addOrderTags(orderId, tags) {
+  const mutation = `
+    mutation($id: ID!, $tags: [String!]!) {
+      tagsAdd(id: $id, tags: $tags) {
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(mutation, { id: orderId, tags });
+  if (data.tagsAdd.userErrors?.length) {
+    throw new Error(`Shopify tagsAdd error: ${JSON.stringify(data.tagsAdd.userErrors)}`);
+  }
+}
+
+/** Quita tags de un pedido. */
+async function removeOrderTags(orderId, tags) {
+  const mutation = `
+    mutation($id: ID!, $tags: [String!]!) {
+      tagsRemove(id: $id, tags: $tags) {
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(mutation, { id: orderId, tags });
+  if (data.tagsRemove.userErrors?.length) {
+    throw new Error(`Shopify tagsRemove error: ${JSON.stringify(data.tagsRemove.userErrors)}`);
+  }
+}
+
+/** Guarda un metafield en un pedido (namespace fijo "tierra_miel"). */
+async function setOrderMetafield(orderId, key, value, type = "single_line_text_field") {
+  const mutation = `
+    mutation($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(mutation, {
+    metafields: [{ ownerId: orderId, namespace: "tierra_miel", key, value, type }],
+  });
+  if (data.metafieldsSet.userErrors?.length) {
+    throw new Error(`Shopify metafieldsSet error: ${JSON.stringify(data.metafieldsSet.userErrors)}`);
+  }
+}
+
+/** Lee un metafield de un pedido (namespace fijo "tierra_miel"). */
+async function getOrderMetafield(orderId, key) {
+  const query = `
+    query($id: ID!, $key: String!) {
+      order(id: $id) { metafield(namespace: "tierra_miel", key: $key) { value } }
+    }
+  `;
+  const data = await shopifyGraphQL(query, { id: orderId, key });
+  return data.order?.metafield?.value || null;
+}
+
+/** Busca pedidos por tag (para el scheduler que revisa pendientes). */
+async function findOrdersByTag(tag, first = 25) {
+  const query = `
+    query($q: String!, $first: Int!) {
+      orders(first: $first, query: $q) {
+        edges { node { id name } }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(query, { q: `tag:'${tag}'`, first });
+  return data.orders.edges.map(({ node }) => node);
+}
+
+module.exports = {
+  searchProducts,
+  getOrderStatus,
+  getCustomerOrders,
+  getOrderForAutomation,
+  appendOrderNote,
+  addOrderTags,
+  removeOrderTags,
+  setOrderMetafield,
+  getOrderMetafield,
+  findOrdersByTag,
+};

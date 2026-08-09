@@ -13,9 +13,23 @@ function getSession(phone) {
   if (existing && Date.now() - existing.lastActive < IDLE_TTL_MS) {
     return existing;
   }
-  const fresh = { messages: [], lastActive: Date.now() };
+  const fresh = { messages: [], lastActive: Date.now(), mode: "normal", orderId: null, orderName: null };
   sessions.set(phone, fresh);
   return fresh;
+}
+
+/**
+ * Pone una conversacion en un modo especial (ej "personalization" o "usage"),
+ * asociada a un pedido especifico. El proximo mensaje que llegue de ese numero
+ * va a usar el system prompt y las herramientas de ese modo en vez del normal.
+ */
+function setSessionMode(phone, mode, orderId, orderName) {
+  const session = getSession(phone);
+  session.mode = mode;
+  session.orderId = orderId;
+  session.orderName = orderName;
+  session.lastActive = Date.now();
+  return session;
 }
 
 function appendMessage(phone, role, content) {
@@ -28,4 +42,4 @@ function appendMessage(phone, role, content) {
   return session;
 }
 
-module.exports = { getSession, appendMessage };
+module.exports = { getSession, appendMessage, setSessionMode };

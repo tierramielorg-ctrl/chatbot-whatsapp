@@ -1,0 +1,155 @@
+// Orquesta los 2 flujos automaticos post-compra:
+// 1) Personalizacion: se dispara cuando se crea/paga un pedido con productos que
+//    necesitan preguntas (ver knowledge/personalization.js).
+// 2) Modo de uso: se dispara N dias habiles despues de que el pedido se marca
+//    como preparado/despachado, segun la region de envio.
+
+const shopify = require("./shopify");
+const whatsapp = require("./whatsapp");
+const session = require("./session");
+const { productNeedsPersonalization } = require("./knowledge/personalization");
+
+const TEMPLATE_PERSONALIZATION = process.env.WHATSAPP_TEMPLATE_PERSONALIZATION || "tierra_miel_personalizacion";
+const TEMPLATE_USAGE = process.env.WHATSAPP_TEMPLATE_USAGE || "tierra_miel_modo_de_uso";
+const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es";
+
+/** Normaliza un telefono de Shopify (+56 9 1234 5678, etc) al formato que pide WhatsApp (sin +, sin espacios). */
+function normalizePhone(raw) {
+  if (!raw) return null;
+  return raw.replace(/[^\d]/g, "");
+}
+
+/** Suma N dias habiles (lunes a viernes) a una fecha. Aproximado: no descuenta feriados. */
+function addBusinessDays(date, days) {
+  const result = new Date(date);
+  let added = 0;
+  while (added < days) {
+    result.setDate(result.getDate() + 1);
+    const day = result.getDay(); // 0 = domingo, 6 = sabado
+    if (day !== 0 && day !== 6) added++;
+  }
+  return result;
+}
+
+function businessDaysForProvince(province) {
+  const p = (province || "").toLowerCase();
+  if (p.includes("arica") || p.includes("parinacota") || p.includes("tarapac")) return 8;
+  if (p.includes("aysén") || p.includes("aysen") || p.includes("magallanes")) return 10;
+  return 5;
+}
+
+/**
+ * Se llama cuando llega el webhook orders/create (o orders/paid) de Shopify.
+ * Si el pedido tiene productos que necesitan personalizacion, manda la plantilla
+ * de apertura y deja la conversacion de ese telefono en modo "personalization".
+ */
+async function handleOrderCreated(orderPayload) {
+  const orderName = (orderPayload.name || "").replace("#", "");
+  const order = await shopify.getOrderForAutomation(orderName);
+  if (!order) {
+    console.warn(`postPurchaseFlows: no se encontro la orden ${orderName} para procesar.`);
+    return;
+  }
+
+  const needsFlow = order.lineItems.some((li) => productNeedsPersonalization(li.title));
+  if (!needsFlow) {
+    console.log(`Pedido ${order.name}: ningun producto requiere personalizacion, se omite.`);
+    return;
+  }
+
+  const phone = normalizePhone(order.phone);
+  if (!phone) {
+    console.warn(`Pedido ${order.name}: no tiene telefono, no se puede iniciar personalizacion por WhatsApp.`);
+    await shopify.addOrderTags(order.id, ["tm-sin-telefono"]);
+    return;
+  }
+
+  const firstName = (order.customerName || "").split(" ")[0] || "";
+  const sent = await whatsapp.sendTemplateMessage(phone, TEMPLATE_PERSONALIZATION, TEMPLATE_LANG, [firstName]);
+  if (!sent) {
+    console.error(`Pedido ${order.name}: fallo el envio de la plantilla de personalizacion.`);
+    return;
+  }
+
+  await shopify.addOrderTags(order.id, ["tm-personalizacion-enviada"]);
+  await shopify.setOrderMetafield(order.id, "personalization_phone", phone);
+  session.setSessionMode(phone, "personalization", order.id, order.name);
+  console.log(`Pedido ${order.name}: plantilla de personalizacion enviada a ${phone}.`);
+}
+
+/**
+ * Se llama cuando llega el webhook fulfillments/create de Shopify. Calcula la
+ * fecha estimada de entrega segun la region y guarda esa fecha en el pedido
+ * para que el scheduler lo revise mas adelante.
+ */
+async function handleFulfillmentCreated(fulfillmentPayload) {
+  const orderIdNumeric = fulfillmentPayload.order_id;
+  if (!orderIdNumeric) return;
+  const orderGid = `gid://shopify/Order/${orderIdNumeric}`;
+
+  // Necesitamos el nombre del pedido para poder re-consultarlo con nuestras
+  // funciones existentes (que buscan por name, no por id numerico).
+  const orderName = fulfillmentPayload.name ? fulfillmentPayload.name.replace("#", "") : null;
+  if (!orderName) return;
+
+  const order = await shopify.getOrderForAutomation(orderName);
+  if (!order) return;
+
+  const days = businessDaysForProvince(order.province);
+  const scheduledAt = addBusinessDays(new Date(), days);
+
+  await shopify.setOrderMetafield(order.id, "usage_scheduled_at", scheduledAt.toISOString());
+  await shopify.addOrderTags(order.id, ["tm-usage-pending"]);
+  console.log(`Pedido ${order.name}: mensaje de modo de uso programado para ${scheduledAt.toISOString()} (${days} dias habiles, region: ${order.province}).`);
+}
+
+/**
+ * Revision periodica (llamada por un setInterval en server.js). Busca pedidos
+ * marcados "tm-usage-pending" cuya fecha programada ya paso, y les manda la
+ * plantilla de apertura del flujo de modo de uso.
+ */
+async function runUsageScheduler() {
+  let orders;
+  try {
+    orders = await shopify.findOrdersByTag("tm-usage-pending", 25);
+  } catch (err) {
+    console.error("runUsageScheduler: error buscando pedidos pendientes:", err);
+    return;
+  }
+
+  for (const { id, name } of orders) {
+    try {
+      const scheduledAtRaw = await shopify.getOrderMetafield(id, "usage_scheduled_at");
+      if (!scheduledAtRaw) continue;
+      if (new Date(scheduledAtRaw) > new Date()) continue; // todavia no toca
+
+      const order = await shopify.getOrderForAutomation(name.replace("#", ""));
+      if (!order) continue;
+      const phone = normalizePhone(order.phone);
+      if (!phone) {
+        await shopify.removeOrderTags(id, ["tm-usage-pending"]);
+        await shopify.addOrderTags(id, ["tm-sin-telefono"]);
+        continue;
+      }
+
+      const firstName = (order.customerName || "").split(" ")[0] || "";
+      const sent = await whatsapp.sendTemplateMessage(phone, TEMPLATE_USAGE, TEMPLATE_LANG, [firstName, order.name]);
+      if (!sent) continue;
+
+      await shopify.removeOrderTags(id, ["tm-usage-pending"]);
+      await shopify.addOrderTags(id, ["tm-usage-enviado"]);
+      session.setSessionMode(phone, "usage", id, order.name);
+      console.log(`Pedido ${order.name}: plantilla de modo de uso enviada a ${phone}.`);
+    } catch (err) {
+      console.error(`runUsageScheduler: error procesando pedido ${name}:`, err);
+    }
+  }
+}
+
+module.exports = {
+  handleOrderCreated,
+  handleFulfillmentCreated,
+  runUsageScheduler,
+  businessDaysForProvince,
+  normalizePhone,
+};

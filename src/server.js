@@ -4,6 +4,8 @@ const express = require("express");
 const whatsapp = require("./whatsapp");
 const claudeAgent = require("./claudeAgent");
 const shopifyAuth = require("./shopifyAuth");
+const shopifyWebhooks = require("./shopifyWebhooks");
+const postPurchaseFlows = require("./postPurchaseFlows");
 
 const app = express();
 
@@ -25,6 +27,10 @@ app.get("/health", (_req, res) => res.status(200).send("ok"));
 // Uso: abrir /shopify/install?shop=tu-tienda.myshopify.com en el navegador (logueado en Shopify).
 app.get("/shopify/install", shopifyAuth.install);
 app.get("/shopify/callback", shopifyAuth.callback);
+
+// Webhooks de Shopify para las automatizaciones post-compra.
+app.post("/webhooks/shopify/orders-create", shopifyWebhooks.ordersCreate);
+app.post("/webhooks/shopify/fulfillments-create", shopifyWebhooks.fulfillmentsCreate);
 
 // Meta llama este GET una vez, al configurar el webhook en el panel de la app.
 app.get("/webhook", (req, res) => {
@@ -82,3 +88,11 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Tierra Miel WhatsApp bot escuchando en el puerto ${PORT}`);
 });
+
+// Revisa cada 30 minutos si hay pedidos a los que ya les toca el mensaje de modo de uso.
+const USAGE_SCHEDULER_INTERVAL_MS = 30 * 60 * 1000;
+setInterval(() => {
+  postPurchaseFlows.runUsageScheduler().catch((err) =>
+    console.error("Error en runUsageScheduler:", err)
+  );
+}, USAGE_SCHEDULER_INTERVAL_MS);
