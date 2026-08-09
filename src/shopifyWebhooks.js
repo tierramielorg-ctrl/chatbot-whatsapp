@@ -37,6 +37,6 @@ function withVerification(handler) {
 }
 
 const ordersCreate = withVerification(postPurchaseFlows.handleOrderCreated);
-const fulfillmentsCreate = withVerification(postPurchaseFlows.handleFulfillmentCreated);
+const ordersUpdated = withVerification(postPurchaseFlows.handleOrderUpdated);
 
-module.exports = { ordersCreate, fulfillmentsCreate };
+module.exports = { ordersCreate, ordersUpdated };

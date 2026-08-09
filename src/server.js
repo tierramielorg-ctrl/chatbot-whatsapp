@@ -30,7 +30,7 @@ app.get("/shopify/callback", shopifyAuth.callback);
 
 // Webhooks de Shopify para las automatizaciones post-compra.
 app.post("/webhooks/shopify/orders-create", shopifyWebhooks.ordersCreate);
-app.post("/webhooks/shopify/fulfillments-create", shopifyWebhooks.fulfillmentsCreate);
+app.post("/webhooks/shopify/orders-updated", shopifyWebhooks.ordersUpdated);
 
 // Meta llama este GET una vez, al configurar el webhook en el panel de la app.
 app.get("/webhook", (req, res) => {

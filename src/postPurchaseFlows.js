@@ -77,19 +77,24 @@ async function handleOrderCreated(orderPayload) {
   console.log(`Pedido ${order.name}: plantilla de personalizacion enviada a ${phone}.`);
 }
 
-/**
- * Se llama cuando llega el webhook fulfillments/create de Shopify. Calcula la
- * fecha estimada de entrega segun la region y guarda esa fecha en el pedido
- * para que el scheduler lo revise mas adelante.
- */
-async function handleFulfillmentCreated(fulfillmentPayload) {
-  const orderIdNumeric = fulfillmentPayload.order_id;
-  if (!orderIdNumeric) return;
-  const orderGid = `gid://shopify/Order/${orderIdNumeric}`;
+// Tags que indican que este pedido ya esta en algun punto del flujo de modo de
+// uso (para no re-programarlo cada vez que el pedido se actualiza por otra razon).
+const USAGE_FLOW_TAGS = ["tm-usage-pending", "tm-usage-enviado", "tm-modo-uso-completo"];
 
-  // Necesitamos el nombre del pedido para poder re-consultarlo con nuestras
-  // funciones existentes (que buscan por name, no por id numerico).
-  const orderName = fulfillmentPayload.name ? fulfillmentPayload.name.replace("#", "") : null;
+/**
+ * Se llama cuando llega el webhook orders/updated de Shopify (usamos este en vez
+ * de fulfillments/create porque ese topico necesita un scope mas granular que no
+ * pedimos). Cuando detecta que el pedido paso a "fulfilled" y todavia no estaba
+ * en el flujo de modo de uso, calcula la fecha estimada segun la region y la
+ * guarda para que el scheduler lo revise mas adelante.
+ */
+async function handleOrderUpdated(orderPayload) {
+  if (orderPayload.fulfillment_status !== "fulfilled") return;
+
+  const existingTags = (orderPayload.tags || "").split(",").map((t) => t.trim());
+  if (USAGE_FLOW_TAGS.some((t) => existingTags.includes(t))) return; // ya procesado
+
+  const orderName = orderPayload.name ? orderPayload.name.replace("#", "") : null;
   if (!orderName) return;
 
   const order = await shopify.getOrderForAutomation(orderName);
@@ -148,7 +153,7 @@ async function runUsageScheduler() {
 
 module.exports = {
   handleOrderCreated,
-  handleFulfillmentCreated,
+  handleOrderUpdated,
   runUsageScheduler,
   businessDaysForProvince,
   normalizePhone,
