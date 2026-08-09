@@ -67,7 +67,11 @@ app.post("/webhook", async (req, res) => {
     whatsapp.markAsRead(message.id);
 
     const reply = await claudeAgent.handleMessage(message.from, message.text);
-    await whatsapp.sendTextMessage(message.from, reply);
+    // reply vacio = una herramienta (ej pregunta interactiva) ya le mando algo
+    // al cliente directamente, no hay texto adicional que mandar.
+    if (reply) {
+      await whatsapp.sendTextMessage(message.from, reply);
+    }
   } catch (err) {
     console.error("Error procesando mensaje entrante:", err);
     try {

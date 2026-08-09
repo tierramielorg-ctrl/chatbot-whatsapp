@@ -128,6 +128,59 @@ async function sendTemplateMessage(to, templateName, languageCode, variables = [
   return res.ok;
 }
 
+/**
+ * Manda una pregunta con opciones tocables (botones si son <=3, lista si son 4-10).
+ * Mucho mejor experiencia que escribir las opciones como texto plano.
+ */
+async function sendInteractiveQuestion(to, questionText, options) {
+  const cleanOptions = options.slice(0, 10);
+  let interactive;
+
+  if (cleanOptions.length <= 3) {
+    interactive = {
+      type: "button",
+      body: { text: questionText.slice(0, 1024) },
+      action: {
+        buttons: cleanOptions.map((opt, i) => ({
+          type: "reply",
+          reply: { id: `opt_${i + 1}`, title: opt.slice(0, 20) },
+        })),
+      },
+    };
+  } else {
+    interactive = {
+      type: "list",
+      body: { text: questionText.slice(0, 1024) },
+      action: {
+        button: "Elegir opción",
+        sections: [
+          {
+            title: "Opciones",
+            rows: cleanOptions.map((opt, i) => ({ id: `opt_${i + 1}`, title: opt.slice(0, 24) })),
+          },
+        ],
+      },
+    };
+  }
+
+  const res = await fetch(
+    `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ messaging_product: "whatsapp", to, type: "interactive", interactive }),
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("Error enviando pregunta interactiva de WhatsApp:", res.status, errText);
+  }
+  return res.ok;
+}
+
 /** Manda un audio (nota de voz) desde una URL publica (mp3/ogg/etc soportado por WhatsApp). */
 async function sendAudioMessage(to, audioUrl) {
   const res = await fetch(
@@ -181,6 +234,7 @@ module.exports = {
   parseIncomingMessage,
   sendTextMessage,
   sendTemplateMessage,
+  sendInteractiveQuestion,
   sendAudioMessage,
   markAsRead,
 };

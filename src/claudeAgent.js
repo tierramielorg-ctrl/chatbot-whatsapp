@@ -109,7 +109,14 @@ INSTRUCCIONES DE ESTA CONVERSACION:
   (si la herramienta indica que no hay audio configurado, simplemente sigue sin el).
 - Conduce la conversacion de preguntas siguiendo la guia de arriba segun los productos
   reales del pedido (usa get_order_line_items para saber que compro exactamente).
-- Ve de a 1-2 preguntas por mensaje, no mandes un formulario largo de una vez.
+- Para CADA pregunta que tenga opciones fijas (que es casi todas segun la guia), usa la
+  herramienta ask_multiple_choice en vez de escribir las opciones como texto plano — se
+  muestran como botones tocables en WhatsApp, mucho mas rapido y agradable de responder
+  que leer un parrafo largo. Pon la pregunta completa en "question" y las opciones cortas
+  (ideal menos de 20 caracteres cada una) en "options". Solo usa texto libre para las
+  pocas preguntas sin opciones fijas (raras en esta guia) o para comentarios breves.
+- Ve de a 1 pregunta por turno (una herramienta ask_multiple_choice a la vez), no mandes
+  un formulario largo de una vez.
 - Una vez tengas todas las respuestas necesarias, usa log_personalization_notes con un
   resumen claro (edad, sintoma/zona, cuando, frecuencia, y la variante/formula recomendada
   segun la logica de la guia) y luego cierra la conversacion agradeciendo, en el mismo
@@ -117,12 +124,31 @@ INSTRUCCIONES DE ESTA CONVERSACION:
 - No uses markdown pesado; WhatsApp solo soporta *negrita*, _cursiva_ y listas con guiones.`;
 }
 
+const askMultipleChoiceTool = {
+  name: "ask_multiple_choice",
+  description:
+    "Manda una pregunta con opciones tocables (botones o lista) por WhatsApp, en vez de texto plano. Usar para cualquier pregunta con opciones fijas.",
+  input_schema: {
+    type: "object",
+    properties: {
+      question: { type: "string", description: "Texto completo de la pregunta, ej '¿Qué edad tiene la persona que lo usará?'" },
+      options: {
+        type: "array",
+        items: { type: "string" },
+        description: "Opciones cortas (2-10), ej ['1-3 años','4-6 años','7-11 años']. Cada una idealmente menos de 20 caracteres.",
+      },
+    },
+    required: ["question", "options"],
+  },
+};
+
 const personalizationTools = [
   {
     name: "get_order_line_items",
     description: "Devuelve los productos comprados en este pedido, para saber cuales necesitan preguntas de personalizacion.",
     input_schema: { type: "object", properties: {} },
   },
+  askMultipleChoiceTool,
   {
     name: "send_welcome_audio",
     description: "Envia el audio de bienvenida de Sebastian. Usar una sola vez, al inicio de la conversacion.",
@@ -150,6 +176,10 @@ async function runPersonalizationTool(name, input, ctx) {
     case "get_order_line_items": {
       const order = await shopify.getOrderForAutomation(ctx.orderName);
       return order ? order.lineItems : { message: "No se pudo obtener el pedido." };
+    }
+    case "ask_multiple_choice": {
+      const ok = await whatsapp.sendInteractiveQuestion(ctx.phone, input.question, input.options);
+      return { sent: ok, __terminal: true };
     }
     case "send_welcome_audio": {
       if (!SEBASTIAN_WELCOME_AUDIO_URL) return { message: "No hay audio de bienvenida configurado todavia." };
@@ -183,6 +213,9 @@ pedido ${orderName}, por WhatsApp, en espanol de Chile, tono calido y cercano.
 Ya se le pregunto al cliente si su pedido llego bien. Este es su mensaje de respuesta.
 
 INSTRUCCIONES:
+- Si esta es la primera respuesta del cliente en esta conversacion y todavia no confirmo
+  la entrega, usa ask_multiple_choice con la pregunta "¿Tu pedido ya llegó?" y opciones
+  ["Sí, ya llegó", "Aún no"] en vez de preguntarlo en texto plano.
 - Si el cliente confirma que el pedido llego (o no dice lo contrario), usa la herramienta
   get_usage_instructions para obtener el modo de uso de cada producto de su pedido, y
   arma un mensaje con esta estructura:
@@ -204,6 +237,7 @@ const usageTools = [
     description: "Devuelve el modo de uso de cada producto comprado en este pedido, con su link de ficha.",
     input_schema: { type: "object", properties: {} },
   },
+  askMultipleChoiceTool,
   {
     name: "complete_usage_flow",
     description: "Cierra el flujo de modo de uso: manda el audio de cierre de Carolina y marca el pedido como completado. Llamar solo despues de haber mandado el resumen de modo de uso.",
@@ -211,8 +245,12 @@ const usageTools = [
   },
 ];
 
-async function runUsageTool(name, _input, ctx) {
+async function runUsageTool(name, input, ctx) {
   switch (name) {
+    case "ask_multiple_choice": {
+      const ok = await whatsapp.sendInteractiveQuestion(ctx.phone, input.question, input.options);
+      return { sent: ok, __terminal: true };
+    }
     case "get_usage_instructions": {
       const order = await shopify.getOrderForAutomation(ctx.orderName);
       if (!order) return { message: "No se pudo obtener el pedido." };
@@ -260,6 +298,7 @@ async function runToolUseLoop({ systemPrompt, tools, runTool, messages, ctx }) {
 
     messages.push({ role: "assistant", content: response.content });
 
+    let hitTerminalTool = false;
     const toolResults = await Promise.all(
       toolUses.map(async (tu) => {
         let result;
@@ -269,11 +308,19 @@ async function runToolUseLoop({ systemPrompt, tools, runTool, messages, ctx }) {
           console.error(`Error ejecutando tool ${tu.name}:`, err);
           result = { error: err.message };
         }
+        if (result?.__terminal) hitTerminalTool = true;
         return { type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) };
       })
     );
 
     messages.push({ role: "user", content: toolResults });
+
+    // Algunas herramientas (ej ask_multiple_choice) ya mandan el mensaje al cliente
+    // como efecto secundario - no hace falta pedirle a Claude texto adicional este turno.
+    if (hitTerminalTool) {
+      finalText = "";
+      break;
+    }
   }
 
   return { finalText, messages };
@@ -315,9 +362,13 @@ async function handleMessage(phone, userText) {
 
   const { finalText, messages: updatedMessages } = await runToolUseLoop({ ...config, messages });
 
+  // finalText === "" es un caso valido: significa que una herramienta (ej
+  // ask_multiple_choice) ya le mando el mensaje al cliente como efecto secundario,
+  // y no hay que mandar nada mas. finalText === null si es un error real.
   const text =
-    finalText ||
-    "Disculpa, tuve un problema procesando tu consulta. ¿Puedes intentar de nuevo o reformularla?";
+    finalText === null
+      ? "Disculpa, tuve un problema procesando tu consulta. ¿Puedes intentar de nuevo o reformularla?"
+      : finalText;
 
   session.messages = updatedMessages.slice(-20);
   session.lastActive = Date.now();
