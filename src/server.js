@@ -84,6 +84,17 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// TEMPORAL: chequeo rapido de cuales variables de plantilla estan configuradas.
+app.get("/debug-template-vars", (_req, res) => {
+  res.json({
+    WHATSAPP_TEMPLATE_PERSONALIZATION: process.env.WHATSAPP_TEMPLATE_PERSONALIZATION || null,
+    WHATSAPP_TEMPLATE_USAGE: process.env.WHATSAPP_TEMPLATE_USAGE || null,
+    WHATSAPP_TEMPLATE_WELCOME: process.env.WHATSAPP_TEMPLATE_WELCOME || null,
+    WHATSAPP_TEMPLATE_TRACKING: process.env.WHATSAPP_TEMPLATE_TRACKING || null,
+    WHATSAPP_TEMPLATE_LANG: process.env.WHATSAPP_TEMPLATE_LANG || null,
+  });
+});
+
 // TEMPORAL: diagnostico del envio de plantilla. Borrar despues de usar.
 app.get("/debug-send-test", async (req, res) => {
   const whatsapp = require("./whatsapp");
