@@ -26,6 +26,18 @@ app.get("/health", (_req, res) => res.status(200).send("ok"));
 app.get("/shopify/install", shopifyAuth.install);
 app.get("/shopify/callback", shopifyAuth.callback);
 
+// TEMPORAL: diagnostico de ANTHROPIC_API_KEY. Solo expone longitud y prefijo/sufijo
+// cortos, nunca el valor completo. Borrar despues de usar.
+app.get("/debug-anthropic-env", (_req, res) => {
+  const key = process.env.ANTHROPIC_API_KEY || "";
+  res.json({
+    length: key.length,
+    first10: key.slice(0, 10),
+    last6: key.slice(-6),
+    startsWithSkAnt: key.startsWith("sk-ant-"),
+  });
+});
+
 // Meta llama este GET una vez, al configurar el webhook en el panel de la app.
 app.get("/webhook", (req, res) => {
   const challenge = whatsapp.verifyWebhook(req.query);
