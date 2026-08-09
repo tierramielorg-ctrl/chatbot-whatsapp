@@ -167,6 +167,9 @@ async function getOrderForAutomation(orderNumber) {
             lineItems(first: 20) {
               edges { node { title quantity variant { product { handle } } } }
             }
+            fulfillments(first: 5) {
+              trackingInfo { number url company }
+            }
           }
         }
       }
@@ -180,6 +183,7 @@ async function getOrderForAutomation(orderNumber) {
     id: o.id,
     name: o.name,
     note: o.note,
+    tracking: o.fulfillments.flatMap((f) => f.trackingInfo)[0] || null,
     tags: o.tags,
     phone: o.phone || o.customer?.phone || o.shippingAddress?.phone || null,
     customerName: [o.customer?.firstName, o.customer?.lastName].filter(Boolean).join(" "),

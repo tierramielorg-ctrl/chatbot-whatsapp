@@ -11,6 +11,7 @@ const { productNeedsPersonalization } = require("./knowledge/personalization");
 
 const TEMPLATE_PERSONALIZATION = process.env.WHATSAPP_TEMPLATE_PERSONALIZATION || "tierra_miel_personalizacion";
 const TEMPLATE_USAGE = process.env.WHATSAPP_TEMPLATE_USAGE || "tierra_miel_modo_de_uso";
+const TEMPLATE_TRACKING = process.env.WHATSAPP_TEMPLATE_TRACKING || "tierra_miel_seguimiento";
 const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es";
 
 /** Normaliza un telefono de Shopify (+56 9 1234 5678, etc) al formato que pide WhatsApp (sin +, sin espacios). */
@@ -82,30 +83,69 @@ async function handleOrderCreated(orderPayload) {
 const USAGE_FLOW_TAGS = ["tm-usage-pending", "tm-usage-enviado", "tm-modo-uso-completo"];
 
 /**
+ * Manda de inmediato la plantilla de seguimiento (numero + link de tracking)
+ * apenas el pedido se marca como despachado. Se controla con el tag
+ * "tm-tracking-enviado" para que no se mande mas de una vez.
+ */
+async function sendTrackingNotification(order) {
+  const phone = normalizePhone(order.phone);
+  if (!phone) {
+    await shopify.addOrderTags(order.id, ["tm-sin-telefono"]);
+    return;
+  }
+  if (!order.tracking) {
+    console.log(`Pedido ${order.name}: aun no hay numero de tracking, se reintentara en la proxima actualizacion.`);
+    return;
+  }
+
+  const firstName = (order.customerName || "").split(" ")[0] || "";
+  const trackingLink = order.tracking.url || order.tracking.number || "";
+  const sent = await whatsapp.sendTemplateMessage(phone, TEMPLATE_TRACKING, TEMPLATE_LANG, [
+    firstName,
+    order.name,
+    trackingLink,
+  ]);
+  if (!sent) {
+    console.error(`Pedido ${order.name}: fallo el envio de la plantilla de seguimiento.`);
+    return;
+  }
+  await shopify.addOrderTags(order.id, ["tm-tracking-enviado"]);
+  console.log(`Pedido ${order.name}: plantilla de seguimiento enviada a ${phone} (tracking: ${trackingLink}).`);
+}
+
+/**
  * Se llama cuando llega el webhook orders/updated de Shopify (usamos este en vez
  * de fulfillments/create porque ese topico necesita un scope mas granular que no
- * pedimos). Cuando detecta que el pedido paso a "fulfilled" y todavia no estaba
- * en el flujo de modo de uso, calcula la fecha estimada segun la region y la
- * guarda para que el scheduler lo revise mas adelante.
+ * pedimos). Cuando detecta que el pedido paso a "fulfilled":
+ * 1) manda de inmediato el aviso de seguimiento/tracking (si no se mando antes), y
+ * 2) si todavia no estaba en el flujo de modo de uso, programa ese mensaje para
+ *    mas adelante segun la region.
  */
 async function handleOrderUpdated(orderPayload) {
   if (orderPayload.fulfillment_status !== "fulfilled") return;
 
   const existingTags = (orderPayload.tags || "").split(",").map((t) => t.trim());
-  if (USAGE_FLOW_TAGS.some((t) => existingTags.includes(t))) return; // ya procesado
-
   const orderName = orderPayload.name ? orderPayload.name.replace("#", "") : null;
   if (!orderName) return;
+
+  const alreadyInUsageFlow = USAGE_FLOW_TAGS.some((t) => existingTags.includes(t));
+  const alreadySentTracking = existingTags.includes("tm-tracking-enviado");
+  if (alreadyInUsageFlow && alreadySentTracking) return; // nada nuevo que hacer
 
   const order = await shopify.getOrderForAutomation(orderName);
   if (!order) return;
 
-  const days = businessDaysForProvince(order.province);
-  const scheduledAt = addBusinessDays(new Date(), days);
+  if (!alreadySentTracking) {
+    await sendTrackingNotification(order);
+  }
 
-  await shopify.setOrderMetafield(order.id, "usage_scheduled_at", scheduledAt.toISOString());
-  await shopify.addOrderTags(order.id, ["tm-usage-pending"]);
-  console.log(`Pedido ${order.name}: mensaje de modo de uso programado para ${scheduledAt.toISOString()} (${days} dias habiles, region: ${order.province}).`);
+  if (!alreadyInUsageFlow) {
+    const days = businessDaysForProvince(order.province);
+    const scheduledAt = addBusinessDays(new Date(), days);
+    await shopify.setOrderMetafield(order.id, "usage_scheduled_at", scheduledAt.toISOString());
+    await shopify.addOrderTags(order.id, ["tm-usage-pending"]);
+    console.log(`Pedido ${order.name}: mensaje de modo de uso programado para ${scheduledAt.toISOString()} (${days} dias habiles, region: ${order.province}).`);
+  }
 }
 
 /**
