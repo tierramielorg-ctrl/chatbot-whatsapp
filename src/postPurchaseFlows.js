@@ -190,9 +190,19 @@ async function sendReviewNotification(order) {
     return false;
   }
   const firstName = (order.customerName || "").split(" ")[0] || "";
+
+  // Usamos la pagina del primer producto del pedido como link de resena (ahi vive
+  // el widget de Vitals), en vez de un link generico a la tienda.
+  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN || "";
+  const firstHandle = order.lineItems.find((li) => li.handle)?.handle;
+  const productLink = firstHandle
+    ? `https://${storeDomain.replace(".myshopify.com", "")}.com/products/${firstHandle}`
+    : REVIEW_LINK || `https://${storeDomain.replace(".myshopify.com", "")}.com`;
+
   const sent = await whatsapp.sendTemplateMessage(phone, TEMPLATE_REVIEW, TEMPLATE_LANG, [
     firstName,
     order.name,
+    productLink,
     DISCOUNT_CODE_REVIEW || "RESENA10",
   ]);
   if (!sent) {
