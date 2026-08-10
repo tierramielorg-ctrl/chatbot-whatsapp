@@ -107,10 +107,14 @@ app.listen(PORT, () => {
   console.log(`Tierra Miel WhatsApp bot escuchando en el puerto ${PORT}`);
 });
 
-// Revisa cada 30 minutos si hay pedidos a los que ya les toca el mensaje de modo de uso.
+// Revisa cada 30 minutos si hay pedidos a los que ya les toca el mensaje de modo de uso,
+// o el recordatorio de resena + descuento.
 const USAGE_SCHEDULER_INTERVAL_MS = 30 * 60 * 1000;
 setInterval(() => {
   postPurchaseFlows.runUsageScheduler().catch((err) =>
     console.error("Error en runUsageScheduler:", err)
+  );
+  postPurchaseFlows.runReviewScheduler().catch((err) =>
+    console.error("Error en runReviewScheduler:", err)
   );
 }, USAGE_SCHEDULER_INTERVAL_MS);

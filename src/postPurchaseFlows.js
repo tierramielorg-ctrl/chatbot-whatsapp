@@ -14,7 +14,11 @@ const TEMPLATE_PERSONALIZATION = process.env.WHATSAPP_TEMPLATE_PERSONALIZATION |
 const TEMPLATE_USAGE = process.env.WHATSAPP_TEMPLATE_USAGE || "tierra_miel_modo_de_uso";
 const TEMPLATE_TRACKING = process.env.WHATSAPP_TEMPLATE_TRACKING || "tierra_miel_seguimiento";
 const TEMPLATE_WELCOME = process.env.WHATSAPP_TEMPLATE_WELCOME || "tierra_miel_bienvenida";
+const TEMPLATE_REVIEW = process.env.WHATSAPP_TEMPLATE_REVIEW || "tierra_miel_resena";
 const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es";
+const REVIEW_DELAY_DAYS = Number(process.env.REVIEW_DELAY_DAYS) || 7;
+const DISCOUNT_CODE_REVIEW = process.env.DISCOUNT_CODE_REVIEW || "";
+const REVIEW_LINK = process.env.REVIEW_LINK || "";
 
 /** Normaliza un telefono de Shopify (+56 9 1234 5678, etc) al formato que pide WhatsApp (sin +, sin espacios). */
 function normalizePhone(raw) {
@@ -176,6 +180,65 @@ async function handleOrderUpdated(orderPayload) {
 }
 
 /**
+ * Manda la plantilla de resena + descuento. Se llama desde el scheduler de
+ * resenas, "REVIEW_DELAY_DAYS" despues de mandado el mensaje de modo de uso.
+ */
+async function sendReviewNotification(order) {
+  const phone = normalizePhone(order.phone);
+  if (!phone) {
+    await shopify.addOrderTags(order.id, ["tm-sin-telefono"]);
+    return false;
+  }
+  const firstName = (order.customerName || "").split(" ")[0] || "";
+  const sent = await whatsapp.sendTemplateMessage(phone, TEMPLATE_REVIEW, TEMPLATE_LANG, [
+    firstName,
+    order.name,
+    DISCOUNT_CODE_REVIEW || "RESENA10",
+  ]);
+  if (!sent) {
+    console.error(`Pedido ${order.name}: fallo el envio de la plantilla de resena.`);
+    return false;
+  }
+  conversationLog.logMessage(phone, "out", `[Plantilla reseña] Pedido ${order.name}, código ${DISCOUNT_CODE_REVIEW || "RESENA10"}.`, order.customerName);
+  console.log(`Pedido ${order.name}: plantilla de resena enviada a ${phone}.`);
+  return true;
+}
+
+/**
+ * Revision periodica (llamada por un setInterval en server.js). Busca pedidos
+ * marcados "tm-review-pending" cuya fecha programada ya paso, y les manda la
+ * plantilla de resena + descuento.
+ */
+async function runReviewScheduler() {
+  let orders;
+  try {
+    orders = await shopify.findOrdersByTag("tm-review-pending", 25);
+  } catch (err) {
+    console.error("runReviewScheduler: error buscando pedidos pendientes:", err);
+    return;
+  }
+
+  for (const { id, name } of orders) {
+    try {
+      const scheduledAtRaw = await shopify.getOrderMetafield(id, "review_scheduled_at");
+      if (!scheduledAtRaw) continue;
+      if (new Date(scheduledAtRaw) > new Date()) continue; // todavia no toca
+
+      const order = await shopify.getOrderForAutomation(name.replace("#", ""));
+      if (!order) continue;
+
+      const ok = await sendReviewNotification(order);
+      if (!ok) continue;
+
+      await shopify.removeOrderTags(id, ["tm-review-pending"]);
+      await shopify.addOrderTags(id, ["tm-resena-enviada"]);
+    } catch (err) {
+      console.error(`runReviewScheduler: error procesando pedido ${name}:`, err);
+    }
+  }
+}
+
+/**
  * Revision periodica (llamada por un setInterval en server.js). Busca pedidos
  * marcados "tm-usage-pending" cuya fecha programada ya paso, y les manda la
  * plantilla de apertura del flujo de modo de uso.
@@ -213,6 +276,13 @@ async function runUsageScheduler() {
       session.setSessionMode(phone, "usage", id, order.name);
       conversationLog.logMessage(phone, "out", `[Plantilla modo de uso] Pedido ${order.name}.`, order.customerName);
       console.log(`Pedido ${order.name}: plantilla de modo de uso enviada a ${phone}.`);
+
+      // Programamos el recordatorio de resena para mas adelante (dias corridos, no habiles).
+      const reviewAt = new Date();
+      reviewAt.setDate(reviewAt.getDate() + REVIEW_DELAY_DAYS);
+      await shopify.setOrderMetafield(id, "review_scheduled_at", reviewAt.toISOString());
+      await shopify.addOrderTags(id, ["tm-review-pending"]);
+      console.log(`Pedido ${order.name}: recordatorio de resena programado para ${reviewAt.toISOString()}.`);
     } catch (err) {
       console.error(`runUsageScheduler: error procesando pedido ${name}:`, err);
     }
@@ -223,6 +293,7 @@ module.exports = {
   handleOrderCreated,
   handleOrderUpdated,
   runUsageScheduler,
+  runReviewScheduler,
   businessDaysForProvince,
   normalizePhone,
 };
