@@ -8,6 +8,26 @@ const { PERSONALIZATION_GUIDE } = require("./knowledge/personalization");
 const { buildUsageBlocks } = require("./knowledge/usageLibrary");
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+/**
+ * Recorta el historial de mensajes a maxLen, pero sin cortar nunca justo en medio
+ * de un par tool_use/tool_result - eso dejaba un tool_result huerfano al inicio
+ * del historial, lo que la API de Anthropic rechaza con un 400 (bug real que
+ * rompio conversaciones en produccion). Escanea hacia adelante desde el punto de
+ * corte naive hasta encontrar un mensaje "seguro" para empezar.
+ */
+function safeTrimMessages(messages, maxLen) {
+  if (messages.length <= maxLen) return messages;
+  let start = messages.length - maxLen;
+  while (start < messages.length) {
+    const msg = messages[start];
+    const isToolResultOnly =
+      Array.isArray(msg.content) && msg.content.every((b) => b.type === "tool_result");
+    if (!isToolResultOnly) break;
+    start++;
+  }
+  return messages.slice(start);
+}
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5";
 
 const SEBASTIAN_WELCOME_AUDIO_URL = process.env.SEBASTIAN_WELCOME_AUDIO_URL || "";
@@ -367,7 +387,19 @@ async function handleMessage(phone, userText) {
     };
   }
 
-  const { finalText, messages: updatedMessages } = await runToolUseLoop({ ...config, messages });
+  let finalText, updatedMessages;
+  try {
+    ({ finalText, messages: updatedMessages } = await runToolUseLoop({ ...config, messages }));
+  } catch (err) {
+    // Si el historial quedo en un estado invalido (ej un tool_result huerfano
+    // por un bug pasado), la API de Anthropic rechaza la llamada entera y la
+    // conversacion queda rota para siempre con esa persona. Nos recuperamos
+    // solos: limpiamos el historial y reintentamos una vez desde cero.
+    console.error(`handleMessage: fallo con historial existente para ${phone}, reintentando con historial limpio:`, err);
+    session.messages = [];
+    const freshMessages = [{ role: "user", content: userText }];
+    ({ finalText, messages: updatedMessages } = await runToolUseLoop({ ...config, messages: freshMessages }));
+  }
 
   // finalText === "" es un caso valido: significa que una herramienta (ej
   // ask_multiple_choice) ya le mando el mensaje al cliente como efecto secundario,
@@ -377,7 +409,7 @@ async function handleMessage(phone, userText) {
       ? "Disculpa, tuve un problema procesando tu consulta. ¿Puedes intentar de nuevo o reformularla?"
       : finalText;
 
-  session.messages = updatedMessages.slice(-20);
+  session.messages = safeTrimMessages(updatedMessages, 20);
   session.lastActive = Date.now();
 
   return text;
