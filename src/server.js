@@ -6,6 +6,8 @@ const claudeAgent = require("./claudeAgent");
 const shopifyAuth = require("./shopifyAuth");
 const shopifyWebhooks = require("./shopifyWebhooks");
 const postPurchaseFlows = require("./postPurchaseFlows");
+const conversationLog = require("./conversationLog");
+const adminRoutes = require("./adminRoutes");
 
 const app = express();
 
@@ -31,6 +33,9 @@ app.get("/shopify/callback", shopifyAuth.callback);
 // Webhooks de Shopify para las automatizaciones post-compra.
 app.post("/webhooks/shopify/orders-create", shopifyWebhooks.ordersCreate);
 app.post("/webhooks/shopify/orders-updated", shopifyWebhooks.ordersUpdated);
+
+// Panel privado para ver conversaciones y responder manualmente.
+app.use("/admin", adminRoutes);
 
 // Meta llama este GET una vez, al configurar el webhook en el panel de la app.
 app.get("/webhook", (req, res) => {
@@ -64,6 +69,14 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
+    conversationLog.logMessage(message.from, "in", message.text, message.name);
+
+    if (conversationLog.isPaused(message.from)) {
+      // Tierra Miel esta respondiendo manualmente esta conversacion - el bot no interviene.
+      console.log(`Conversacion con ${message.from} pausada, el bot no responde.`);
+      return;
+    }
+
     whatsapp.markAsRead(message.id);
 
     const reply = await claudeAgent.handleMessage(message.from, message.text);
@@ -71,6 +84,7 @@ app.post("/webhook", async (req, res) => {
     // al cliente directamente, no hay texto adicional que mandar.
     if (reply) {
       await whatsapp.sendTextMessage(message.from, reply);
+      conversationLog.logMessage(message.from, "out", reply);
     }
   } catch (err) {
     console.error("Error procesando mensaje entrante:", err);

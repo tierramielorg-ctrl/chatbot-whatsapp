@@ -2,6 +2,7 @@ const Anthropic = require("@anthropic-ai/sdk");
 const shopify = require("./shopify");
 const whatsapp = require("./whatsapp");
 const notify = require("./notify");
+const conversationLog = require("./conversationLog");
 const { getSession, appendMessage, setSessionMode } = require("./session");
 const { PERSONALIZATION_GUIDE } = require("./knowledge/personalization");
 const { buildUsageBlocks } = require("./knowledge/usageLibrary");
@@ -179,6 +180,9 @@ async function runPersonalizationTool(name, input, ctx) {
     }
     case "ask_multiple_choice": {
       const ok = await whatsapp.sendInteractiveQuestion(ctx.phone, input.question, input.options);
+      if (ok) {
+        conversationLog.logMessage(ctx.phone, "out", `${input.question} (${input.options.join(" / ")})`);
+      }
       return { sent: ok, __terminal: true };
     }
     case "send_welcome_audio": {
@@ -249,6 +253,9 @@ async function runUsageTool(name, input, ctx) {
   switch (name) {
     case "ask_multiple_choice": {
       const ok = await whatsapp.sendInteractiveQuestion(ctx.phone, input.question, input.options);
+      if (ok) {
+        conversationLog.logMessage(ctx.phone, "out", `${input.question} (${input.options.join(" / ")})`);
+      }
       return { sent: ok, __terminal: true };
     }
     case "get_usage_instructions": {

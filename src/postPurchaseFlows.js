@@ -7,6 +7,7 @@
 const shopify = require("./shopify");
 const whatsapp = require("./whatsapp");
 const session = require("./session");
+const conversationLog = require("./conversationLog");
 const { productNeedsPersonalization } = require("./knowledge/personalization");
 
 const TEMPLATE_PERSONALIZATION = process.env.WHATSAPP_TEMPLATE_PERSONALIZATION || "tierra_miel_personalizacion";
@@ -58,6 +59,7 @@ async function sendWelcomeMessage(order) {
     return;
   }
   await shopify.addOrderTags(order.id, ["tm-bienvenida-enviada"]);
+  conversationLog.logMessage(phone, "out", `[Plantilla bienvenida] Pedido ${order.name} recibido.`, order.customerName);
   console.log(`Pedido ${order.name}: plantilla de bienvenida enviada a ${phone}.`);
 }
 
@@ -98,6 +100,7 @@ async function handleOrderCreated(orderPayload) {
   await shopify.addOrderTags(order.id, ["tm-personalizacion-enviada"]);
   await shopify.setOrderMetafield(order.id, "personalization_phone", phone);
   session.setSessionMode(phone, "personalization", order.id, order.name);
+  conversationLog.logMessage(phone, "out", `[Plantilla personalización] Pedido ${order.name}.`, order.customerName);
   console.log(`Pedido ${order.name}: plantilla de personalizacion enviada a ${phone}.`);
 }
 
@@ -133,6 +136,7 @@ async function sendTrackingNotification(order) {
     return;
   }
   await shopify.addOrderTags(order.id, ["tm-tracking-enviado"]);
+  conversationLog.logMessage(phone, "out", `[Plantilla seguimiento] Pedido ${order.name}: ${trackingLink}`, order.customerName);
   console.log(`Pedido ${order.name}: plantilla de seguimiento enviada a ${phone} (tracking: ${trackingLink}).`);
 }
 
@@ -207,6 +211,7 @@ async function runUsageScheduler() {
       await shopify.removeOrderTags(id, ["tm-usage-pending"]);
       await shopify.addOrderTags(id, ["tm-usage-enviado"]);
       session.setSessionMode(phone, "usage", id, order.name);
+      conversationLog.logMessage(phone, "out", `[Plantilla modo de uso] Pedido ${order.name}.`, order.customerName);
       console.log(`Pedido ${order.name}: plantilla de modo de uso enviada a ${phone}.`);
     } catch (err) {
       console.error(`runUsageScheduler: error procesando pedido ${name}:`, err);
