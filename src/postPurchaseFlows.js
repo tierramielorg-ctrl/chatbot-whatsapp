@@ -23,7 +23,13 @@ const REVIEW_LINK = process.env.REVIEW_LINK || "";
 /** Normaliza un telefono de Shopify (+56 9 1234 5678, etc) al formato que pide WhatsApp (sin +, sin espacios). */
 function normalizePhone(raw) {
   if (!raw) return null;
-  return raw.replace(/[^\d]/g, "");
+  const digits = raw.replace(/[^\d]/g, "");
+  // Pedidos antiguos a veces guardaron el telefono sin el codigo de pais (56).
+  // Un celular chileno sin codigo de pais son 9 digitos y empieza con 9.
+  if (digits.length === 9 && digits.startsWith("9")) {
+    return `56${digits}`;
+  }
+  return digits;
 }
 
 /** Suma N dias habiles (lunes a viernes) a una fecha. Aproximado: no descuenta feriados. */
