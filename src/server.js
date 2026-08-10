@@ -102,6 +102,14 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// TEMPORAL: verificar variables de la plantilla de resena. Borrar despues de usar.
+app.get("/debug-review-vars", (_req, res) => {
+  res.json({
+    WHATSAPP_TEMPLATE_REVIEW: process.env.WHATSAPP_TEMPLATE_REVIEW || null,
+    DISCOUNT_CODE_REVIEW: process.env.DISCOUNT_CODE_REVIEW || null,
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Tierra Miel WhatsApp bot escuchando en el puerto ${PORT}`);
