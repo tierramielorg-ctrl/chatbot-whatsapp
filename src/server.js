@@ -105,6 +105,10 @@ app.post("/webhook", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Tierra Miel WhatsApp bot escuchando en el puerto ${PORT}`);
+  // Corre la red de seguridad apenas arranca (ej. tras un reinicio), no solo cada 30 min.
+  postPurchaseFlows.runOrderCatchupScheduler().catch((err) =>
+    console.error("Error en runOrderCatchupScheduler (arranque):", err)
+  );
 });
 
 // Revisa cada 30 minutos si hay pedidos a los que ya les toca el mensaje de modo de uso,
@@ -116,5 +120,8 @@ setInterval(() => {
   );
   postPurchaseFlows.runReviewScheduler().catch((err) =>
     console.error("Error en runReviewScheduler:", err)
+  );
+  postPurchaseFlows.runOrderCatchupScheduler().catch((err) =>
+    console.error("Error en runOrderCatchupScheduler:", err)
   );
 }, USAGE_SCHEDULER_INTERVAL_MS);

@@ -289,7 +289,28 @@ async function findOrdersByTag(tag, first = 25) {
   return data.orders.edges.map(({ node }) => node);
 }
 
+/**
+ * Red de seguridad: busca pedidos creados en las ultimas N horas que no tengan
+ * NINGUNA etiqueta "tm-" (senal de que nuestra automatizacion nunca los toco,
+ * por ejemplo porque el webhook no llego durante un reinicio del servidor).
+ */
+async function findRecentOrdersMissingAutomation(hours = 48, first = 50) {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const query = `
+    query($q: String!, $first: Int!) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
+        edges { node { id name tags } }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(query, { q: `created_at:>'${since}'`, first });
+  return data.orders.edges
+    .map(({ node }) => node)
+    .filter((o) => !o.tags.some((t) => t.startsWith("tm-")));
+}
+
 module.exports = {
+  findRecentOrdersMissingAutomation,
   searchProducts,
   getOrderStatus,
   getCustomerOrders,

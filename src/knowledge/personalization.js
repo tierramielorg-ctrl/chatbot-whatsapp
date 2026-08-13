@@ -244,31 +244,20 @@ Tierra Miel sepa exactamente que preparar. Despues manda un mensaje de cierre br
 confirmando que ya tienen todo lo necesario.
 `;
 
-// Palabras clave para saber si un producto de la orden necesita el flujo completo
-// de preguntas. Coincidencia flexible contra el titulo del producto (minusculas).
+// Regla acotada a pedido de Tierra Miel (11 ago 2026): SOLO los Roll-On
+// individuales y estos 2 kits especificos activan el flujo de preguntas.
+// Cremas, ungüentos, gotarios, tonicos y todo lo demas quedan fuera - para esos
+// el cliente recibe el mensaje de bienvenida normal, sin preguntas.
 const PRODUCTS_NEEDING_FLOW = [
-  "bruxismo", "rinitis", "equilibrio emocional", "sueño", "sueno", "descanso",
-  "ansiedad", "estrés", "estres", "bienestar emocional", "energía", "energia",
-  "migraña", "migrana", "dolor de cabeza", "digestivo", "sistema digestivo",
-  "respiratorio", "dermatitis", "piel atópica", "piel atopica", "psoriasis",
-  "pie de atleta", "antifúngico", "antifungico", "hemorroidal", "hemorroides",
-  "defensas", "sistema inmune", "kit invierno", "quema grasa", "activación", "activacion",
-  "dolor muscular", "ciática", "ciatica", "artritis", "artrosis",
-  "piernas cansadas", "várices", "varices", "circulación", "circulacion",
-  "calambres", "capilar", "anticaída", "anticaida", "caspa",
-];
-
-// Productos que explicitamente NO llevan el flujo completo (solo se menciona por
-// claridad, Claude ya sabe esto por el texto de la guia de arriba).
-const PRODUCTS_SKIP_FLOW = [
-  "rosácea", "rosacea", "super blend", "pestañas", "pestanas", "desodorante",
-  "miel", "polen", "pan de abeja", "sal de mar", "pack gourmet", "menstrual",
-  "jabón", "jabon", "manos de miel", "sabañones", "sabanones",
+  "roll on",
+  "roll-on",
+  "roll_on",
+  "chao rinitis", // "✓ Kit Bruxismo Natural..." y "ROLL ON..." ya calzan con "roll on" arriba;
+  "kit bruxismo", // estas 2 quedan explicitas por si cambian el titulo y pierden "roll on".
 ];
 
 function productNeedsPersonalization(title) {
   const t = (title || "").toLowerCase();
-  if (PRODUCTS_SKIP_FLOW.some((kw) => t.includes(kw))) return false;
   return PRODUCTS_NEEDING_FLOW.some((kw) => t.includes(kw));
 }
 

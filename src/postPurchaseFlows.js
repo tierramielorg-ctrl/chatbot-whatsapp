@@ -305,11 +305,37 @@ async function runUsageScheduler() {
   }
 }
 
+/**
+ * Red de seguridad (llamada periodicamente por server.js): revisa pedidos de las
+ * ultimas 48h que se quedaron sin ninguna etiqueta "tm-" (el webhook no los
+ * proceso, ej. por un reinicio del servidor en mal momento) y los reprocesa
+ * como si el webhook orders/create acabara de llegar.
+ */
+async function runOrderCatchupScheduler() {
+  let orders;
+  try {
+    orders = await shopify.findRecentOrdersMissingAutomation(48, 50);
+  } catch (err) {
+    console.error("runOrderCatchupScheduler: error buscando pedidos sin procesar:", err);
+    return;
+  }
+
+  for (const { name } of orders) {
+    try {
+      console.log(`runOrderCatchupScheduler: reprocesando pedido ${name} (se quedo sin etiqueta tm-).`);
+      await handleOrderCreated({ name });
+    } catch (err) {
+      console.error(`runOrderCatchupScheduler: error reprocesando pedido ${name}:`, err);
+    }
+  }
+}
+
 module.exports = {
   handleOrderCreated,
   handleOrderUpdated,
   runUsageScheduler,
   runReviewScheduler,
+  runOrderCatchupScheduler,
   businessDaysForProvince,
   normalizePhone,
 };
