@@ -253,7 +253,8 @@ const PRODUCTS_NEEDING_FLOW = [
   "roll-on",
   "roll_on",
   "chao rinitis", // "✓ Kit Bruxismo Natural..." y "ROLL ON..." ya calzan con "roll on" arriba;
-  "kit bruxismo", // estas 2 quedan explicitas por si cambian el titulo y pierden "roll on".
+  "kit bruxismo", // estas quedan explicitas por si cambian el titulo y pierden "roll on".
+  "kit invierno",
 ];
 
 function productNeedsPersonalization(title) {
