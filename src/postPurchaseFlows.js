@@ -70,6 +70,10 @@ async function sendWelcomeMessage(order) {
   }
   await shopify.addOrderTags(order.id, ["tm-bienvenida-enviada"]);
   conversationLog.logMessage(phone, "out", `[Plantilla bienvenida] Pedido ${order.name} recibido.`, order.customerName);
+  await shopify.appendOrderNote(
+    order.id,
+    `WhatsApp bot ${new Date().toLocaleString("es-CL")}: mensaje de bienvenida enviado a ${phone}.`
+  ).catch((err) => console.error(`Pedido ${order.name}: error dejando nota de bienvenida:`, err));
   console.log(`Pedido ${order.name}: plantilla de bienvenida enviada a ${phone}.`);
 }
 
@@ -111,6 +115,10 @@ async function handleOrderCreated(orderPayload) {
   await shopify.setOrderMetafield(order.id, "personalization_phone", phone);
   session.setSessionMode(phone, "personalization", order.id, order.name);
   conversationLog.logMessage(phone, "out", `[Plantilla personalización] Pedido ${order.name}.`, order.customerName);
+  await shopify.appendOrderNote(
+    order.id,
+    `WhatsApp bot ${new Date().toLocaleString("es-CL")}: mensaje de personalización (preguntas) enviado a ${phone}.`
+  ).catch((err) => console.error(`Pedido ${order.name}: error dejando nota de personalizacion:`, err));
   console.log(`Pedido ${order.name}: plantilla de personalizacion enviada a ${phone}.`);
 }
 
@@ -147,6 +155,10 @@ async function sendTrackingNotification(order) {
   }
   await shopify.addOrderTags(order.id, ["tm-tracking-enviado"]);
   conversationLog.logMessage(phone, "out", `[Plantilla seguimiento] Pedido ${order.name}: ${trackingLink}`, order.customerName);
+  await shopify.appendOrderNote(
+    order.id,
+    `WhatsApp bot ${new Date().toLocaleString("es-CL")}: seguimiento enviado a ${phone} (${trackingLink}).`
+  ).catch((err) => console.error(`Pedido ${order.name}: error dejando nota de seguimiento:`, err));
   console.log(`Pedido ${order.name}: plantilla de seguimiento enviada a ${phone} (tracking: ${trackingLink}).`);
 }
 
@@ -216,6 +228,10 @@ async function sendReviewNotification(order) {
     return false;
   }
   conversationLog.logMessage(phone, "out", `[Plantilla reseña] Pedido ${order.name}, código ${DISCOUNT_CODE_REVIEW || "RESENA10"}.`, order.customerName);
+  await shopify.appendOrderNote(
+    order.id,
+    `WhatsApp bot ${new Date().toLocaleString("es-CL")}: mensaje de reseña + descuento enviado a ${phone} (código ${DISCOUNT_CODE_REVIEW || "RESENA10"}).`
+  ).catch((err) => console.error(`Pedido ${order.name}: error dejando nota de resena:`, err));
   console.log(`Pedido ${order.name}: plantilla de resena enviada a ${phone}.`);
   return true;
 }
@@ -291,6 +307,10 @@ async function runUsageScheduler() {
       await shopify.addOrderTags(id, ["tm-usage-enviado"]);
       session.setSessionMode(phone, "usage", id, order.name);
       conversationLog.logMessage(phone, "out", `[Plantilla modo de uso] Pedido ${order.name}.`, order.customerName);
+      await shopify.appendOrderNote(
+        id,
+        `WhatsApp bot ${new Date().toLocaleString("es-CL")}: mensaje de modo de uso enviado a ${phone}.`
+      ).catch((err) => console.error(`Pedido ${order.name}: error dejando nota de modo de uso:`, err));
       console.log(`Pedido ${order.name}: plantilla de modo de uso enviada a ${phone}.`);
 
       // Programamos el recordatorio de resena para mas adelante (dias corridos, no habiles).
