@@ -109,6 +109,9 @@ app.listen(PORT, () => {
   postPurchaseFlows.runOrderCatchupScheduler().catch((err) =>
     console.error("Error en runOrderCatchupScheduler (arranque):", err)
   );
+  postPurchaseFlows.runContestCatchupScheduler().catch((err) =>
+    console.error("Error en runContestCatchupScheduler (arranque):", err)
+  );
 });
 
 // Revisa cada 30 minutos si hay pedidos a los que ya les toca el mensaje de modo de uso,
@@ -123,5 +126,8 @@ setInterval(() => {
   );
   postPurchaseFlows.runOrderCatchupScheduler().catch((err) =>
     console.error("Error en runOrderCatchupScheduler:", err)
+  );
+  postPurchaseFlows.runContestCatchupScheduler().catch((err) =>
+    console.error("Error en runContestCatchupScheduler:", err)
   );
 }, USAGE_SCHEDULER_INTERVAL_MS);

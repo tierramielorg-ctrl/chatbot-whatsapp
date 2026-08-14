@@ -161,6 +161,7 @@ async function getOrderForAutomation(orderNumber) {
             name
             note
             tags
+            createdAt
             phone
             customer { firstName lastName phone email }
             shippingAddress { province provinceCode countryCodeV2 phone }
@@ -183,6 +184,7 @@ async function getOrderForAutomation(orderNumber) {
     id: o.id,
     name: o.name,
     note: o.note,
+    createdAt: o.createdAt,
     tracking: o.fulfillments.flatMap((f) => f.trackingInfo)[0] || null,
     tags: o.tags,
     phone: o.phone || o.customer?.phone || o.shippingAddress?.phone || null,
@@ -309,8 +311,27 @@ async function findRecentOrdersMissingAutomation(hours = 48, first = 50) {
     .filter((o) => !o.tags.some((t) => t.startsWith("tm-")));
 }
 
+/**
+ * Busca pedidos creados dentro de un rango de fechas (ISO) que NO tengan un tag
+ * en particular. Se usa para el sorteo: reintenta mandar el ticket de participacion
+ * a quien todavia le falte, por ejemplo mientras Meta aprueba la plantilla nueva.
+ */
+async function findOrdersCreatedBetweenMissingTag(sinceISO, untilISO, missingTag, first = 50) {
+  const query = `
+    query($q: String!, $first: Int!) {
+      orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
+        edges { node { id name tags } }
+      }
+    }
+  `;
+  const q = `created_at:>='${sinceISO}' AND created_at:<='${untilISO}' AND -tag:'${missingTag}'`;
+  const data = await shopifyGraphQL(query, { q, first });
+  return data.orders.edges.map(({ node }) => node);
+}
+
 module.exports = {
   findRecentOrdersMissingAutomation,
+  findOrdersCreatedBetweenMissingTag,
   searchProducts,
   getOrderStatus,
   getCustomerOrders,

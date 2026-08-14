@@ -8,6 +8,7 @@ const shopify = require("./shopify");
 const whatsapp = require("./whatsapp");
 const session = require("./session");
 const conversationLog = require("./conversationLog");
+const notify = require("./notify");
 const { productNeedsPersonalization } = require("./knowledge/personalization");
 
 const TEMPLATE_PERSONALIZATION = process.env.WHATSAPP_TEMPLATE_PERSONALIZATION || "tierra_miel_personalizacion";
@@ -15,10 +16,18 @@ const TEMPLATE_USAGE = process.env.WHATSAPP_TEMPLATE_USAGE || "tierra_miel_modo_
 const TEMPLATE_TRACKING = process.env.WHATSAPP_TEMPLATE_TRACKING || "tierra_miel_seguimiento";
 const TEMPLATE_WELCOME = process.env.WHATSAPP_TEMPLATE_WELCOME || "tierra_miel_bienvenida";
 const TEMPLATE_REVIEW = process.env.WHATSAPP_TEMPLATE_REVIEW || "tierra_miel_resena";
+const TEMPLATE_SORTEO = process.env.WHATSAPP_TEMPLATE_SORTEO || "tierra_miel_sorteo_ticket";
 const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es";
 const REVIEW_DELAY_DAYS = Number(process.env.REVIEW_DELAY_DAYS) || 7;
 const DISCOUNT_CODE_REVIEW = process.env.DISCOUNT_CODE_REVIEW || "";
 const REVIEW_LINK = process.env.REVIEW_LINK || "";
+
+// ---- Sorteo "Una compra, tres premios" (bases en https://tierramiel.org/pages/sorteo) ----
+// Compras validas del 13 al 27 de agosto de 2026. Sorteo en vivo el 28 de agosto, 20:00 hrs
+// (Chile), por Instagram con random.org. El ticket extra por compartir historia + etiquetar
+// a 3 amigos lo registra Tierra Miel a mano viendo Instagram (no es parte de esta automatizacion).
+const CONTEST_START = new Date("2026-08-13T00:00:00-04:00");
+const CONTEST_END = new Date("2026-08-27T23:59:59-04:00");
 
 /** Normaliza un telefono de Shopify (+56 9 1234 5678, etc) al formato que pide WhatsApp (sin +, sin espacios). */
 function normalizePhone(raw) {
@@ -77,6 +86,71 @@ async function sendWelcomeMessage(order) {
   console.log(`Pedido ${order.name}: plantilla de bienvenida enviada a ${phone}.`);
 }
 
+function orderInContestWindow(createdAt) {
+  if (!createdAt) return false;
+  const d = new Date(createdAt);
+  return d >= CONTEST_START && d <= CONTEST_END;
+}
+
+/**
+ * Sorteo "Una compra, tres premios": si el pedido cae dentro de la ventana del
+ * concurso, confirma el ticket de participacion por email (no necesita aprobacion,
+ * sale de inmediato) y por WhatsApp (plantilla nueva, puede tardar en aprobarse en
+ * Meta - mientras tanto el catchup scheduler reintenta solo). Usamos el numero de
+ * pedido como numero de ticket: es unico automaticamente y facil de verificar contra
+ * Shopify. Revisa los tags antes de mandar cada canal para no duplicar en reintentos.
+ */
+async function sendContestEntryNotification(order) {
+  if (!orderInContestWindow(order.createdAt)) return;
+
+  const firstName = (order.customerName || "").split(" ")[0] || "";
+  const ticketId = order.name;
+  const tags = order.tags || [];
+
+  if (order.email && !tags.includes("tm-sorteo-email-enviado")) {
+    const subject = "🎉 ¡Ya estás participando en el sorteo de Tierra Miel!";
+    const body = `¡Hola ${firstName}!
+
+Tu compra ${order.name} ya te dio un ticket de participación en el sorteo "Una compra, tres premios" de Tierra Miel 🍯
+
+🎫 Tu número de ticket: ${ticketId}
+
+Se sortean 3 premios entre 3 ganadores distintos:
+- Kit Ritual de la Naturaleza
+- Gift Card $25.000
+- Pack Gourmet con Molinillo
+
+📅 Sorteo en vivo: 28 de agosto, 20:00 hrs, por Instagram, con random.org.
+
+¿Quieres el doble de chances? Sube la historia del concurso y etiqueta a 3 amigos - nosotros lo vemos y te sumamos el ticket extra automáticamente.
+
+Gracias por comprar con Tierra Miel 💛`;
+    const emailSent = await notify.sendCustomerEmail(order.email, subject, body);
+    if (emailSent) {
+      await shopify.addOrderTags(order.id, ["tm-sorteo-email-enviado"]).catch((err) =>
+        console.error(`Pedido ${order.name}: error marcando tag de email del sorteo:`, err)
+      );
+      console.log(`Pedido ${order.name}: ticket de sorteo (${ticketId}) confirmado por email a ${order.email}.`);
+    }
+  }
+
+  const phone = normalizePhone(order.phone);
+  if (phone && !tags.includes("tm-sorteo-whatsapp-enviado")) {
+    const sent = await whatsapp.sendTemplateMessage(phone, TEMPLATE_SORTEO, TEMPLATE_LANG, [firstName, ticketId]);
+    if (sent) {
+      await shopify.addOrderTags(order.id, ["tm-sorteo-whatsapp-enviado"]);
+      conversationLog.logMessage(phone, "out", `[Plantilla sorteo] Ticket de participación: ${ticketId}.`, order.customerName);
+      await shopify.appendOrderNote(
+        order.id,
+        `WhatsApp bot ${new Date().toLocaleString("es-CL")}: ticket de participación del sorteo (${ticketId}) confirmado por WhatsApp a ${phone}.`
+      ).catch((err) => console.error(`Pedido ${order.name}: error dejando nota del sorteo:`, err));
+      console.log(`Pedido ${order.name}: ticket de sorteo (${ticketId}) confirmado por WhatsApp a ${phone}.`);
+    } else {
+      console.log(`Pedido ${order.name}: la plantilla "${TEMPLATE_SORTEO}" aun no esta aprobada (o fallo el envio) - se reintenta sola en el proximo scheduler.`);
+    }
+  }
+}
+
 /**
  * Se llama cuando llega el webhook orders/create (o orders/paid) de Shopify.
  * Si el pedido tiene productos que necesitan personalizacion, manda la plantilla
@@ -89,6 +163,10 @@ async function handleOrderCreated(orderPayload) {
     console.warn(`postPurchaseFlows: no se encontro la orden ${orderName} para procesar.`);
     return;
   }
+
+  await sendContestEntryNotification(order).catch((err) =>
+    console.error(`Pedido ${order.name}: error en la notificacion del sorteo:`, err)
+  );
 
   const needsFlow = order.lineItems.some((li) => productNeedsPersonalization(li.title));
   if (!needsFlow) {
@@ -350,12 +428,47 @@ async function runOrderCatchupScheduler() {
   }
 }
 
+/**
+ * Red de seguridad del sorteo (llamada periodicamente por server.js): reintenta la
+ * confirmacion de ticket (WhatsApp y/o email) para pedidos dentro de la ventana del
+ * concurso que todavia les falte algun canal - por ejemplo mientras Meta aprueba la
+ * plantilla nueva. Se detiene sola despues del 27 de agosto.
+ */
+async function runContestCatchupScheduler() {
+  if (new Date() > CONTEST_END) return;
+
+  for (const tag of ["tm-sorteo-whatsapp-enviado", "tm-sorteo-email-enviado"]) {
+    let orders;
+    try {
+      orders = await shopify.findOrdersCreatedBetweenMissingTag(
+        CONTEST_START.toISOString(),
+        CONTEST_END.toISOString(),
+        tag,
+        50
+      );
+    } catch (err) {
+      console.error(`runContestCatchupScheduler: error buscando pedidos sin "${tag}":`, err);
+      continue;
+    }
+    for (const { name } of orders) {
+      try {
+        const order = await shopify.getOrderForAutomation(name.replace("#", ""));
+        if (!order) continue;
+        await sendContestEntryNotification(order);
+      } catch (err) {
+        console.error(`runContestCatchupScheduler: error reprocesando pedido ${name}:`, err);
+      }
+    }
+  }
+}
+
 module.exports = {
   handleOrderCreated,
   handleOrderUpdated,
   runUsageScheduler,
   runReviewScheduler,
   runOrderCatchupScheduler,
+  runContestCatchupScheduler,
   businessDaysForProvince,
   normalizePhone,
 };
