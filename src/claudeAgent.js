@@ -6,6 +6,7 @@ const conversationLog = require("./conversationLog");
 const { getSession, appendMessage, setSessionMode } = require("./session");
 const { PERSONALIZATION_GUIDE } = require("./knowledge/personalization");
 const { buildUsageBlocks } = require("./knowledge/usageLibrary");
+const { normalizePhone } = require("./postPurchaseFlows");
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -34,30 +35,153 @@ const SEBASTIAN_WELCOME_AUDIO_URL = process.env.SEBASTIAN_WELCOME_AUDIO_URL || "
 const CAROLINA_CLOSING_AUDIO_URL = process.env.CAROLINA_CLOSING_AUDIO_URL || "";
 
 // ---------------------------------------------------------------------------
+// Derivacion a una persona real (Sebastian) cuando el bot no puede resolver algo
+// solo, o cuando el cliente lo pide explicitamente.
+// ---------------------------------------------------------------------------
+
+const SEBASTIAN_PHONE = normalizePhone(process.env.SEBASTIAN_PHONE || "946409348");
+// Mismo horario publicado en tierramiel.org/pages/contact - se usa para poner una
+// expectativa real de cuando le van a responder, en vez de dejarlo sin saber.
+const HORARIO_ATENCION = "de lunes a sábado, de 9:00 a 18:00 hrs";
+
+function dentroDeHorarioAtencion() {
+  // Hora de Chile (UTC-4). America/Santiago cambia de horario en el año pero esto
+  // es solo una estimacion para el mensaje al cliente, no algo critico.
+  const now = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
+  const day = now.getDay(); // 0 domingo, 6 sabado
+  const hour = now.getHours();
+  return day >= 1 && day <= 6 && hour >= 9 && hour < 18;
+}
+
+// ---------------------------------------------------------------------------
 // MODO NORMAL (atencion al cliente reactiva)
 // ---------------------------------------------------------------------------
 
-const NORMAL_SYSTEM_PROMPT = `Eres el asistente de atencion al cliente de Tierra Miel, una tienda chilena
+const NORMAL_SYSTEM_PROMPT = `Eres parte del equipo de atencion al cliente de Tierra Miel, una tienda chilena
 (tierramiel.org) que vende por Shopify. Respondes por WhatsApp, en espanol de Chile, de forma
 calida, cercana y breve (los mensajes de WhatsApp deben ser cortos, sin bloques largos de texto).
+
+COMO SUENAS: escribe como una persona real del equipo, no como un bot generico - cercana,
+natural, sin frases robotico-corporativas ni firmas tipo "Atentamente, Asistente Virtual". Si
+alguien te pregunta directamente si eres un bot/IA, respondelo con honestidad pero breve y sin
+ponerte a la defensiva ("Sí, soy el asistente virtual de Tierra Miel, pero estoy aquí para
+ayudarte igual que el equipo 🙂") y sigues ayudando con normalidad - no lo niegues ni evadas la
+pregunta, eso rompe mas la confianza que decirlo con naturalidad.
 
 Tus objetivos:
 1. Atencion al cliente: responder dudas generales (envios, horarios, medios de pago, cambios/devoluciones)
    de forma honesta. Si no sabes algo con certeza y no tienes una herramienta para verificarlo, dilo
-   claramente y ofrece derivar a una persona del equipo en vez de inventar una respuesta.
-2. Ventas y recomendacion de productos: usa la herramienta search_products para buscar en el catalogo
-   real antes de recomendar o de dar un precio. Nunca inventes precios, stock ni nombres de productos.
+   claramente en vez de inventar una respuesta.
+2. Ventas consultivas: no esperes a que te pidan un producto puntual. Si alguien describe una
+   molestia o necesidad (ej "me cuesta dormir", "mi hijo tiene bruxismo", "tengo la piel muy seca"),
+   compórtate como una vendedora que sabe del tema: haz 1-2 preguntas cortas y naturales (no un
+   formulario) para entender mejor el caso - usa como referencia la guia de sintomas y productos
+   mas abajo, ahi esta el detalle de que preguntar segun la molestia. Con eso, usa search_products
+   para traer el producto real (precio, stock, variantes, descripcion), recomienda el mas indicado
+   con seguridad, y manda el link directo para comprarlo - no esperes a que el cliente lo pida.
+   Nunca inventes precios, stock, variantes ni nombres de productos: siempre verificalos con
+   search_products antes de mencionarlos.
+   Si preguntan por los ingredientes: la descripcion real (de search_products) suele listar los
+   activos principales de cada variante (ej "Menta Piperita · Deep Blue® · Lavanda" para Migraña).
+   Habla especificamente de los 2-3 activos mas relevantes para LO QUE ESA PERSONA busca (no
+   sueltes la lista completa sin contexto) y explica en una linea por que cada uno le sirve para
+   su caso. Si piden el listado INCI completo (nombres cientificos) y no aparece en la ficha, NO
+   lo inventes bajo ninguna circunstancia (es algo que la gente se aplica en la piel, un dato mal
+   inventado es un riesgo real) - dilo con honestidad y ofrece derivarlo con escalate_to_human.
 3. Seguimiento de pedidos: usa get_order_status si el cliente da un numero de pedido (ej "#1032" o "1032").
    Usa get_customer_orders si el cliente no tiene el numero pero te da su email o si prefieres buscar por
    su telefono (el numero de WhatsApp del cliente ya esta disponible como su telefono de contacto).
+4. Derivar a una persona cuando corresponda: usa escalate_to_human si el cliente pide explicitamente
+   hablar con una persona/con Sebastian/con el equipo, O si ya intentaste ayudar 1-2 veces con las
+   herramientas disponibles y no lograste resolver su duda. No te quedes dando vueltas ni inventes
+   una respuesta cuando no la tienes - es mejor derivar a tiempo que hacer esperar o confundir al cliente.
+
+GUIA DE SINTOMAS -> PRODUCTOS (pensada originalmente para las preguntas post-compra, pero el
+mapeo sintoma-producto sirve igual de bien ANTES de comprar, para recomendar bien):
+${PERSONALIZATION_GUIDE}
+Usala asi en esta conversacion (pre-compra): NO hagas el formulario completo de 4 preguntas ni
+uses ask_multiple_choice (esa herramienta es solo del flujo post-compra) - aqui basta 1-2
+preguntas conversacionales breves para identificar el producto/variante correcto, y despues
+recomiendas con seguridad usando search_products para los datos reales.
 
 Reglas importantes:
 - Todos los precios estan en pesos chilenos (CLP).
 - Nunca reveles datos de otro cliente distinto al que esta escribiendo.
 - Si una herramienta falla o no encuentra resultados, dilo con naturalidad y ofrece alternativas
-  (buscar con otro termino, confirmar el numero de pedido, o hablar con una persona del equipo).
+  (buscar con otro termino, confirmar el numero de pedido, o derivar con escalate_to_human).
 - No uses markdown pesado (nada de tablas); WhatsApp solo soporta *negrita*, _cursiva_ y listas simples con guiones.
 - Cierra ofreciendo un siguiente paso util cuando tenga sentido, sin sonar a vendedor insistente.`;
+
+// ---------------------------------------------------------------------------
+// MODO VENTAS (leads que llegan por la linea de campanas, ej. anuncios
+// "Click to WhatsApp" con catalogo) - mismo catalogo/herramientas que el modo
+// normal, pero mas proactivo en cerrar la venta en vez de solo responder dudas.
+// ---------------------------------------------------------------------------
+
+const DISCOUNT_CODE_VENTAS = process.env.DISCOUNT_CODE_VENTAS || "";
+
+function buildVentasSystemPrompt(referral) {
+  const referralBlock = referral
+    ? `\nDATOS DEL ANUNCIO que trajo a este cliente (usalos para abrir la conversacion
+reconociendo que producto le interesa, no los repitas tal cual - resumelos con naturalidad):
+- Titulo/texto del anuncio: ${referral.headline || referral.body || "(sin texto)"}
+- Fuente: ${referral.source_type || "anuncio"} (${referral.source_url || "sin link"})\n`
+    : "\n(Este mensaje no trae datos de anuncio - puede ser un reenvio o un mensaje directo a esta linea; pregunta con naturalidad en que producto esta interesado.)\n";
+
+  return `${VENTAS_SYSTEM_PROMPT_BASE}
+${referralBlock}`;
+}
+
+const VENTAS_SYSTEM_PROMPT_BASE = `Eres parte del equipo de ventas de Tierra Miel, una tienda chilena
+(tierramiel.org) que vende por Shopify. Respondes por WhatsApp, en espanol de Chile, de forma
+calida, cercana y breve (mensajes cortos, sin bloques largos de texto). Escribe como una persona
+real del equipo, no como un bot generico. Si preguntan directo si eres IA, responde con honestidad
+y brevedad ("Sí, soy el asistente virtual de Tierra Miel, pero te ayudo igual 🙂") y sigues
+ayudando con normalidad - no lo niegues.
+
+Este numero es distinto al de atencion al cliente general: aqui SOLO llegan personas que
+hicieron clic en un anuncio con un producto especifico - todavia no son clientes, estan
+recien conociendo el producto y con dudas tipicas de "curiosidad" (¿esto realmente funciona?,
+¿es seguro?, ¿que trae?). Tu objetivo principal es resolver esa duda puntual rapido y
+ayudarles a decidir la compra - no dar una catedra ni dejarlos dando vueltas con preguntas
+abiertas.
+
+Si preguntan por ingredientes: usa la descripcion real de search_products, habla de los 2-3
+activos mas relevantes para SU caso puntual (no la lista completa sin contexto) y explica por
+que sirven. Si piden el INCI/nombres cientificos completos y no esta en la ficha, no lo inventes
+(riesgo real, es algo que se aplica en la piel) - dilo con honestidad y usa escalate_to_human.
+
+Si el cliente pide hablar con una persona/Sebastian/el equipo, o si ya intentaste ayudar 1-2
+veces y no logras resolver su duda, usa escalate_to_human - no lo dejes esperando una respuesta
+que no tienes.
+
+Como abrir la conversacion:
+- Si el mensaje trae informacion de un anuncio (referral: titulo/texto/producto), reconocelo
+  de inmediato ("Vi que te interesó [producto]...") en vez de preguntar "¿en qué te ayudo?"
+  como si no supieras por qué te escriben.
+- Usa search_products para traer precio, stock y link reales del producto del anuncio antes
+  de hablar de precio - nunca inventes precios ni datos.
+
+Como cerrar:
+- Resuelve la objecion mas probable de ese producto en 1-2 mensajes (seguridad/ingredientes,
+  evidencia de que funciona, modo de uso) y despues ofrece el link de compra directo -
+  no esperes a que el cliente lo pida.
+- Si despues de 2-3 intercambios la persona sigue dudando sin decir que no le interesa,${
+  DISCOUNT_CODE_VENTAS
+    ? ` ofrece el codigo de descuento *${DISCOUNT_CODE_VENTAS}* como empujón final (mencionalo una sola vez, no lo repitas si ya lo dijiste).`
+    : " ofrece resolver cualquier ultima duda y dejar el link a mano - dile que quedas atento(a)."
+}
+- Si la persona claramente no esta interesada o solo quiere info general (no de compra), no
+  insistas - responde su duda con naturalidad y quedas disponible, sin forzar el cierre.
+
+Reglas importantes (iguales que siempre):
+- Todos los precios estan en pesos chilenos (CLP).
+- Nunca reveles datos de otro cliente distinto al que esta escribiendo.
+- Si una herramienta falla o no encuentra resultados, dilo con naturalidad y ofrece alternativas.
+- No uses markdown pesado (nada de tablas); WhatsApp solo soporta *negrita*, _cursiva_ y listas simples con guiones.
+- Si el cliente pregunta por un pedido que ya hizo (seguimiento), usa get_order_status /
+  get_customer_orders igual que en atencion normal - aqui tambien puede llegar un cliente
+  existente que ya compro antes.`;
 
 const normalTools = [
   {
@@ -90,6 +214,27 @@ const normalTools = [
       required: ["identifier"],
     },
   },
+  {
+    name: "escalate_to_human",
+    description:
+      "Deriva la conversacion a Sebastian (equipo Tierra Miel) cuando el cliente lo pide explicitamente " +
+      "(quiere hablar con una persona / con Sebastian / con el equipo) O cuando ya intentaste ayudar 1-2 " +
+      "veces y no lograste resolver la duda del cliente con las herramientas disponibles. Le manda un " +
+      "mensaje al cliente avisando que un miembro del equipo va a seguir la conversacion, con el horario " +
+      "de atencion real, y pausa las respuestas automaticas para que no se crucen con Sebastian. " +
+      "No la uses para dudas normales que si puedes resolver con search_products/get_order_status.",
+    input_schema: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description:
+            "Resumen breve y claro (1-2 frases) de por que se deriva: que pidio o necesitaba el cliente, y que se intento. Esto lo lee Sebastian, se especifico.",
+        },
+      },
+      required: ["reason"],
+    },
+  },
 ];
 
 async function runNormalTool(name, input, whatsappPhone) {
@@ -106,6 +251,38 @@ async function runNormalTool(name, input, whatsappPhone) {
       const identifier = input.identifier || whatsappPhone;
       const orders = await shopify.getCustomerOrders(identifier);
       return orders.length ? orders : { message: "No se encontraron pedidos para ese cliente." };
+    }
+    case "escalate_to_human": {
+      const phone = whatsappPhone;
+      const horarioMsg = dentroDeHorarioAtencion()
+        ? "En un rato más te escribe directo por acá 🙂"
+        : `Nuestro horario de atención es ${HORARIO_ATENCION} — apenas abramos te escribe directo por acá.`;
+      await whatsapp.sendTextMessage(
+        phone,
+        `¡Perfecto! Le paso esto a Sebastián de nuestro equipo para que te ayude personalmente. ${horarioMsg}`
+      );
+      conversationLog.logMessage(phone, "out", `[Derivado a Sebastián] ${input.reason}`);
+      conversationLog.pause(phone);
+
+      // Aviso a Sebastian: intento por WhatsApp (best effort - si no le ha escrito
+      // al numero del bot en las ultimas 24h, Meta puede rechazarlo por no tener
+      // plantilla aprobada) y siempre por email (mas confiable, no depende de eso).
+      if (SEBASTIAN_PHONE) {
+        await whatsapp
+          .sendTextMessage(
+            SEBASTIAN_PHONE,
+            `🔔 Cliente ${phone} necesita ayuda tuya en WhatsApp:\n${input.reason}\n\nRespóndele directo a ese número.`
+          )
+          .catch((err) => console.error("escalate_to_human: no se pudo avisar a Sebastian por WhatsApp:", err));
+      }
+      await notify
+        .sendInternalNotification(
+          `Cliente esperando en WhatsApp - ${phone}`,
+          `El bot derivo esta conversacion a una persona.\n\nMotivo: ${input.reason}\n\nResponder directo al cliente en WhatsApp: ${phone}`
+        )
+        .catch((err) => console.error("escalate_to_human: no se pudo mandar notificacion interna:", err));
+
+      return { escalated: true, __terminal: true };
     }
     default:
       return { error: `Herramienta desconocida: ${name}` };
@@ -358,9 +535,13 @@ async function runToolUseLoop({ systemPrompt, tools, runTool, messages, ctx }) {
  * Mantiene el historial de conversacion por numero de telefono, y usa el modo
  * (normal / personalization / usage) para decidir que system prompt y herramientas usar.
  */
-async function handleMessage(phone, userText) {
+async function handleMessage(phone, userText, meta = {}) {
+  // meta.phoneNumberId: por que linea nuestra entro el mensaje (ver whatsapp.js).
+  // meta.referral: info del anuncio de origen, si el cliente escribio via CTWA.
+  const origin = whatsapp.isVentasLine(meta.phoneNumberId) ? "ventas" : "main";
+
   appendMessage(phone, "user", userText);
-  const session = getSession(phone);
+  const session = getSession(phone, origin);
   const messages = [...session.messages];
 
   let config;
@@ -377,6 +558,13 @@ async function handleMessage(phone, userText) {
       tools: usageTools,
       runTool: runUsageTool,
       ctx: { phone, orderId: session.orderId, orderName: session.orderName },
+    };
+  } else if (session.origin === "ventas") {
+    config = {
+      systemPrompt: buildVentasSystemPrompt(meta.referral),
+      tools: normalTools,
+      runTool: runNormalTool,
+      ctx: phone,
     };
   } else {
     config = {

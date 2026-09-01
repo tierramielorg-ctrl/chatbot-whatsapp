@@ -8,12 +8,25 @@ const IDLE_TTL_MS = 1000 * 60 * 60 * 6; // 6 horas: pasado esto, se reinicia el 
 
 const sessions = new Map(); // phone -> { messages: [...], lastActive: number }
 
-function getSession(phone) {
+/**
+ * origin: "main" (linea de atencion normal) o "ventas" (linea dedicada a campanas,
+ * ej. anuncios "Click to WhatsApp"). Solo se usa para decidir el origin de una
+ * conversacion NUEVA - una vez creada, la conversacion mantiene su origin aunque
+ * este parametro cambie en llamadas futuras (no debería pasar en la práctica).
+ */
+function getSession(phone, origin = "main") {
   const existing = sessions.get(phone);
   if (existing && Date.now() - existing.lastActive < IDLE_TTL_MS) {
     return existing;
   }
-  const fresh = { messages: [], lastActive: Date.now(), mode: "normal", orderId: null, orderName: null };
+  const fresh = {
+    messages: [],
+    lastActive: Date.now(),
+    mode: "normal",
+    orderId: null,
+    orderName: null,
+    origin,
+  };
   sessions.set(phone, fresh);
   return fresh;
 }

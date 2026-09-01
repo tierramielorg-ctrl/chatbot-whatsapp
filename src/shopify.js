@@ -54,11 +54,15 @@ async function searchProducts(searchTerm, limit = 5) {
             handle
             status
             onlineStoreUrl
+            description(truncateAt: 700)
             priceRangeV2 {
               minVariantPrice { amount currencyCode }
               maxVariantPrice { amount currencyCode }
             }
             totalInventory
+            variants(first: 10) {
+              edges { node { title price inventoryQuantity } }
+            }
           }
         }
       }
@@ -74,10 +78,25 @@ async function searchProducts(searchTerm, limit = 5) {
         : `${Number(min.amount).toLocaleString("es-CL")}-${Number(
             max.amount
           ).toLocaleString("es-CL")} ${min.currencyCode}`;
+    const variants = node.variants.edges.map(({ node: v }) => ({
+      title: v.title,
+      price: `${Number(v.price).toLocaleString("es-CL")} ${min.currencyCode}`,
+      inStock: v.inventoryQuantity > 0,
+    }));
     return {
       title: node.title,
       price: priceLabel,
       inStock: node.totalInventory > 0,
+      // Descripcion real de la ficha (sin HTML), para que el bot pueda responder
+      // preguntas de detalle (ingredientes, variedad/floracion, modo de uso, etc)
+      // en vez de solo precio y stock.
+      description: node.description || null,
+      // Solo variantes con nombre real (mas de 1, o no es "Default Title") - asi el
+      // bot sabe que opciones/variedades tiene ese producto (ej Quillay/Multifloral/Ulmo).
+      variants:
+        variants.length > 1 || (variants[0] && variants[0].title !== "Default Title")
+          ? variants
+          : undefined,
       url:
         node.onlineStoreUrl ||
         `https://${STORE_DOMAIN.replace(".myshopify.com", "")}.com/products/${node.handle}`,
@@ -117,6 +136,65 @@ async function getOrderStatus(orderNumber) {
     fulfillmentStatus: o.displayFulfillmentStatus,
     total: money(o.totalPriceSet),
     tracking: o.fulfillments.flatMap((f) => f.trackingInfo),
+  };
+}
+
+/**
+ * Busca un pedido por numero PERO solo lo devuelve si el email o telefono
+ * ingresado coincide con el del pedido. Pensado para el formulario publico de
+ * "seguimiento de pedido" en tierramiel.org: nunca hay que confiar en que quien
+ * llena el formulario es el dueno del pedido solo porque acerto el numero.
+ * Devuelve null tanto si el pedido no existe como si el dato no coincide (no
+ * hay que distinguir los dos casos de cara al cliente, para no filtrar que
+ * numeros de pedido existen).
+ */
+async function getOrderStatusPublic(orderNumber, identifier) {
+  const cleaned = String(orderNumber).replace("#", "").trim();
+  const query = `
+    query OrderStatusPublic($q: String!) {
+      orders(first: 1, query: $q) {
+        edges {
+          node {
+            name
+            createdAt
+            displayFulfillmentStatus
+            email
+            phone
+            customer { email phone }
+            shippingAddress { city }
+            fulfillments(first: 5) {
+              trackingInfo { number url company }
+            }
+          }
+        }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(query, { q: `name:${cleaned}` });
+  const edge = data.orders.edges[0];
+  if (!edge) return null;
+  const o = edge.node;
+
+  const normalizePhone = (p) => (p || "").replace(/\D/g, "").slice(-8);
+  const normalizeEmail = (e) => (e || "").trim().toLowerCase();
+
+  const candidateEmails = [o.email, o.customer?.email].map(normalizeEmail);
+  const candidatePhones = [o.phone, o.customer?.phone].map(normalizePhone);
+
+  const input = identifier.trim();
+  const inputIsEmail = input.includes("@");
+  const matches = inputIsEmail
+    ? candidateEmails.includes(normalizeEmail(input))
+    : candidatePhones.includes(normalizePhone(input)) && normalizePhone(input).length >= 8;
+
+  if (!matches) return null;
+
+  return {
+    name: o.name,
+    createdAt: o.createdAt,
+    fulfillmentStatus: o.displayFulfillmentStatus,
+    city: o.shippingAddress?.city || null,
+    tracking: o.fulfillments.flatMap((f) => f.trackingInfo)[0] || null,
   };
 }
 
@@ -334,6 +412,7 @@ module.exports = {
   findOrdersCreatedBetweenMissingTag,
   searchProducts,
   getOrderStatus,
+  getOrderStatusPublic,
   getCustomerOrders,
   getOrderForAutomation,
   appendOrderNote,

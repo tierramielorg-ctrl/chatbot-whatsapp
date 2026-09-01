@@ -2,9 +2,23 @@ const crypto = require("crypto");
 
 const TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+// Segunda linea, dedicada a campanas (ej. anuncios "Click to WhatsApp" con catalogo).
+// Mismo WABA/token que la linea principal - opcional: si no esta configurada, el bot
+// sigue funcionando exactamente igual que antes con una sola linea.
+const PHONE_NUMBER_ID_VENTAS = process.env.WHATSAPP_PHONE_NUMBER_ID_VENTAS || null;
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
 const API_VERSION = process.env.WHATSAPP_API_VERSION || "v20.0";
+
+/** true si este phone_number_id es la linea de campanas/ventas. */
+function isVentasLine(phoneNumberId) {
+  return Boolean(PHONE_NUMBER_ID_VENTAS) && phoneNumberId === PHONE_NUMBER_ID_VENTAS;
+}
+
+/** Resuelve el phone_number_id a usar para mandar un mensaje: el pedido, o el principal por defecto. */
+function resolveFromId(fromId) {
+  return fromId || PHONE_NUMBER_ID;
+}
 
 /** Maneja el GET de verificacion que Meta hace al configurar el webhook. */
 function verifyWebhook(query) {
@@ -50,6 +64,12 @@ function parseIncomingMessage(body) {
     id: message.id,
     from: message.from, // numero de telefono del cliente (sin '+')
     name: contact?.profile?.name || null,
+    // phone_number_id de NUESTRA linea por la que entro el mensaje (util cuando hay
+    // mas de un numero, ej linea principal vs linea de campanas).
+    phoneNumberId: value?.metadata?.phone_number_id || null,
+    // Presente solo si el cliente escribio haciendo clic en un anuncio "Click to
+    // WhatsApp" (source_type "ad" o "post"): trae el producto/anuncio de origen.
+    referral: message.referral || null,
     type: message.type,
     text:
       message.type === "text"
@@ -64,9 +84,9 @@ function parseIncomingMessage(body) {
   };
 }
 
-async function sendTextMessage(to, text) {
+async function sendTextMessage(to, text, fromId) {
   const res = await fetch(
-    `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+    `https://graph.facebook.com/${API_VERSION}/${resolveFromId(fromId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -93,9 +113,9 @@ async function sendTextMessage(to, text) {
  * conversacion cuando el negocio escribe primero, ej. confirmacion de pedido).
  * variables: array de strings que llenan los {{1}}, {{2}}, etc del body de la plantilla.
  */
-async function sendTemplateMessage(to, templateName, languageCode, variables = []) {
+async function sendTemplateMessage(to, templateName, languageCode, variables = [], fromId) {
   const res = await fetch(
-    `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+    `https://graph.facebook.com/${API_VERSION}/${resolveFromId(fromId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -132,7 +152,7 @@ async function sendTemplateMessage(to, templateName, languageCode, variables = [
  * Manda una pregunta con opciones tocables (botones si son <=3, lista si son 4-10).
  * Mucho mejor experiencia que escribir las opciones como texto plano.
  */
-async function sendInteractiveQuestion(to, questionText, options) {
+async function sendInteractiveQuestion(to, questionText, options, fromId) {
   const cleanOptions = options.slice(0, 10);
   let interactive;
 
@@ -164,7 +184,7 @@ async function sendInteractiveQuestion(to, questionText, options) {
   }
 
   const res = await fetch(
-    `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+    `https://graph.facebook.com/${API_VERSION}/${resolveFromId(fromId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -182,9 +202,9 @@ async function sendInteractiveQuestion(to, questionText, options) {
 }
 
 /** Manda un audio (nota de voz) desde una URL publica (mp3/ogg/etc soportado por WhatsApp). */
-async function sendAudioMessage(to, audioUrl) {
+async function sendAudioMessage(to, audioUrl, fromId) {
   const res = await fetch(
-    `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+    `https://graph.facebook.com/${API_VERSION}/${resolveFromId(fromId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -206,10 +226,10 @@ async function sendAudioMessage(to, audioUrl) {
   return res.ok;
 }
 
-async function markAsRead(messageId) {
+async function markAsRead(messageId, fromId) {
   try {
     await fetch(
-      `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+      `https://graph.facebook.com/${API_VERSION}/${resolveFromId(fromId)}/messages`,
       {
         method: "POST",
         headers: {
@@ -237,4 +257,6 @@ module.exports = {
   sendInteractiveQuestion,
   sendAudioMessage,
   markAsRead,
+  isVentasLine,
+  PHONE_NUMBER_ID_VENTAS,
 };

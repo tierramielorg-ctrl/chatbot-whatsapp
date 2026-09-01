@@ -8,6 +8,7 @@ const shopifyWebhooks = require("./shopifyWebhooks");
 const postPurchaseFlows = require("./postPurchaseFlows");
 const conversationLog = require("./conversationLog");
 const adminRoutes = require("./adminRoutes");
+const trackingRoutes = require("./trackingRoutes");
 
 const app = express();
 
@@ -36,6 +37,9 @@ app.post("/webhooks/shopify/orders-updated", shopifyWebhooks.ordersUpdated);
 
 // Panel privado para ver conversaciones y responder manualmente.
 app.use("/admin", adminRoutes);
+
+// Endpoint publico para la pagina "Seguimiento de tu pedido" del sitio.
+app.use("/api", trackingRoutes);
 
 // Meta llama este GET una vez, al configurar el webhook en el panel de la app.
 app.get("/webhook", (req, res) => {
@@ -77,13 +81,16 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
-    whatsapp.markAsRead(message.id);
+    whatsapp.markAsRead(message.id, message.phoneNumberId);
 
-    const reply = await claudeAgent.handleMessage(message.from, message.text);
+    const reply = await claudeAgent.handleMessage(message.from, message.text, {
+      phoneNumberId: message.phoneNumberId,
+      referral: message.referral,
+    });
     // reply vacio = una herramienta (ej pregunta interactiva) ya le mando algo
     // al cliente directamente, no hay texto adicional que mandar.
     if (reply) {
-      await whatsapp.sendTextMessage(message.from, reply);
+      await whatsapp.sendTextMessage(message.from, reply, message.phoneNumberId);
       conversationLog.logMessage(message.from, "out", reply);
     }
   } catch (err) {
