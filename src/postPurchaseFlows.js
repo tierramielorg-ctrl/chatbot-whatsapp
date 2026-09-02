@@ -17,6 +17,7 @@ const TEMPLATE_TRACKING = process.env.WHATSAPP_TEMPLATE_TRACKING || "tierra_miel
 const TEMPLATE_WELCOME = process.env.WHATSAPP_TEMPLATE_WELCOME || "tierra_miel_bienvenida";
 const TEMPLATE_REVIEW = process.env.WHATSAPP_TEMPLATE_REVIEW || "tierra_miel_resena";
 const TEMPLATE_SORTEO = process.env.WHATSAPP_TEMPLATE_SORTEO || "tierra_miel_sorteo_ticket";
+const TEMPLATE_SEPTIEMBRE = process.env.WHATSAPP_TEMPLATE_SEPTIEMBRE || "tierra_miel_septiembre_regalo";
 const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es";
 const REVIEW_DELAY_DAYS = Number(process.env.REVIEW_DELAY_DAYS) || 7;
 const DISCOUNT_CODE_REVIEW = process.env.DISCOUNT_CODE_REVIEW || "";
@@ -28,6 +29,15 @@ const REVIEW_LINK = process.env.REVIEW_LINK || "";
 // a 3 amigos lo registra Tierra Miel a mano viendo Instagram (no es parte de esta automatizacion).
 const CONTEST_START = new Date("2026-08-13T00:00:00-04:00");
 const CONTEST_END = new Date("2026-08-27T23:59:59-04:00");
+
+// ---- Regalo de Fiestas Patrias (septiembre 2026) ----
+// Todo pedido creado en septiembre recibe, ademas del mensaje de bienvenida normal,
+// un aviso por WhatsApp de que su pedido incluye un regalo de Sal de Mar 100% Natural,
+// con un mensaje breve educativo sobre la sal de mar. OJO: esto es solo el aviso -
+// el regalo fisico lo tiene que agregar bodega/despacho al preparar el pedido, este
+// codigo no lo hace por si solo.
+const SEPTIEMBRE_START = new Date("2026-09-01T00:00:00-04:00");
+const SEPTIEMBRE_END = new Date("2026-09-30T23:59:59-04:00");
 
 /** Normaliza un telefono de Shopify (+56 9 1234 5678, etc) al formato que pide WhatsApp (sin +, sin espacios). */
 function normalizePhone(raw) {
@@ -151,6 +161,41 @@ Gracias por comprar con Tierra Miel 💛`;
   }
 }
 
+function orderInSeptiembreWindow(createdAt) {
+  if (!createdAt) return false;
+  const d = new Date(createdAt);
+  return d >= SEPTIEMBRE_START && d <= SEPTIEMBRE_END;
+}
+
+/**
+ * Regalo de Fiestas Patrias: si el pedido es de septiembre, manda por WhatsApp el
+ * aviso del regalo de Sal de Mar 100% Natural (plantilla nueva, puede tardar en
+ * aprobarse en Meta - el catchup scheduler reintenta solo mientras tanto).
+ * Idempotente via tag para no duplicar en reintentos.
+ */
+async function sendSeptiembreGiftMessage(order) {
+  if (!orderInSeptiembreWindow(order.createdAt)) return;
+  const tags = order.tags || [];
+  if (tags.includes("tm-septiembre-regalo-enviado")) return;
+
+  const phone = normalizePhone(order.phone);
+  if (!phone) return;
+
+  const firstName = (order.customerName || "").split(" ")[0] || "";
+  const sent = await whatsapp.sendTemplateMessage(phone, TEMPLATE_SEPTIEMBRE, TEMPLATE_LANG, [firstName, order.name]);
+  if (sent) {
+    await shopify.addOrderTags(order.id, ["tm-septiembre-regalo-enviado"]);
+    conversationLog.logMessage(phone, "out", `[Plantilla regalo septiembre] Sal de Mar 100% Natural - Pedido ${order.name}.`, order.customerName);
+    await shopify.appendOrderNote(
+      order.id,
+      `WhatsApp bot ${new Date().toLocaleString("es-CL")}: aviso de regalo Fiestas Patrias (Sal de Mar) enviado a ${phone}. RECORDATORIO PARA BODEGA: agregar el regalo fisico al preparar este pedido.`
+    ).catch((err) => console.error(`Pedido ${order.name}: error dejando nota del regalo de septiembre:`, err));
+    console.log(`Pedido ${order.name}: aviso de regalo de septiembre enviado a ${phone}.`);
+  } else {
+    console.log(`Pedido ${order.name}: la plantilla "${TEMPLATE_SEPTIEMBRE}" aun no esta aprobada (o fallo el envio) - se reintenta sola en el proximo scheduler.`);
+  }
+}
+
 /**
  * Se llama cuando llega el webhook orders/create (o orders/paid) de Shopify.
  * Si el pedido tiene productos que necesitan personalizacion, manda la plantilla
@@ -166,6 +211,9 @@ async function handleOrderCreated(orderPayload) {
 
   await sendContestEntryNotification(order).catch((err) =>
     console.error(`Pedido ${order.name}: error en la notificacion del sorteo:`, err)
+  );
+  await sendSeptiembreGiftMessage(order).catch((err) =>
+    console.error(`Pedido ${order.name}: error en el aviso de regalo de septiembre:`, err)
   );
 
   const needsFlow = order.lineItems.some((li) => productNeedsPersonalization(li.title));
@@ -462,6 +510,37 @@ async function runContestCatchupScheduler() {
   }
 }
 
+/**
+ * Red de seguridad del regalo de septiembre: reintenta el aviso de WhatsApp para
+ * pedidos de septiembre que todavia no lo tengan (ej. mientras Meta aprueba la
+ * plantilla nueva). Se detiene sola despues del 30 de septiembre.
+ */
+async function runSeptiembreCatchupScheduler() {
+  if (new Date() > SEPTIEMBRE_END) return;
+
+  let orders;
+  try {
+    orders = await shopify.findOrdersCreatedBetweenMissingTag(
+      SEPTIEMBRE_START.toISOString(),
+      SEPTIEMBRE_END.toISOString(),
+      "tm-septiembre-regalo-enviado",
+      50
+    );
+  } catch (err) {
+    console.error("runSeptiembreCatchupScheduler: error buscando pedidos sin aviso:", err);
+    return;
+  }
+  for (const { name } of orders) {
+    try {
+      const order = await shopify.getOrderForAutomation(name.replace("#", ""));
+      if (!order) continue;
+      await sendSeptiembreGiftMessage(order);
+    } catch (err) {
+      console.error(`runSeptiembreCatchupScheduler: error reprocesando pedido ${name}:`, err);
+    }
+  }
+}
+
 module.exports = {
   handleOrderCreated,
   handleOrderUpdated,
@@ -469,6 +548,7 @@ module.exports = {
   runReviewScheduler,
   runOrderCatchupScheduler,
   runContestCatchupScheduler,
+  runSeptiembreCatchupScheduler,
   businessDaysForProvince,
   normalizePhone,
 };
