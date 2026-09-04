@@ -71,7 +71,10 @@ const ADMIN_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <div id="list"><h1>🍯 Conversaciones</h1><div id="convo-list"></div></div>
+  <div id="list">
+    <h1>🍯 Conversaciones <button id="new-convo-btn" class="btn-secondary" style="float:right;margin-top:-4px;" onclick="startNewConvo()">+ Nuevo</button></h1>
+    <div id="convo-list"></div>
+  </div>
   <div id="chat">
     <div id="empty">Selecciona una conversación de la izquierda</div>
   </div>
@@ -107,6 +110,26 @@ async function openConvo(phone) {
   await loadList();
   const convo = await api("/admin/api/conversations/" + encodeURIComponent(phone));
   renderChat(convo);
+}
+
+/** Normaliza un numero chileno ingresado a mano (con o sin +56, espacios, guiones). */
+function normalizePhoneInput(raw) {
+  let digits = (raw || "").replace(/[^0-9]/g, "");
+  if (digits.length === 9 && digits.startsWith("9")) digits = "56" + digits;
+  return digits;
+}
+
+/** Inicia una conversacion con un numero que todavia no aparece en la lista (no tiene historial). */
+function startNewConvo() {
+  const raw = prompt("Numero de WhatsApp del cliente (con o sin +56):");
+  if (!raw) return;
+  const phone = normalizePhoneInput(raw);
+  if (phone.length < 10) {
+    alert("Ese numero no se ve valido. Ejemplo: +56 9 1234 5678");
+    return;
+  }
+  activePhone = phone;
+  renderChat({ phone, name: null, messages: [], paused: false });
 }
 
 function renderChat(convo) {
