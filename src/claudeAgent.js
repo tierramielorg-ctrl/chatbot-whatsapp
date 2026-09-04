@@ -61,13 +61,13 @@ function dentroDeHorarioAtencion() {
 const PREGUNTAS_FRECUENTES = `
 PREGUNTAS FRECUENTES CON RESPUESTA YA DEFINIDA (usa esta info tal cual, no improvises otra):
 
-- "¿Tienen tienda física / local / dónde los puedo visitar?": Por ahora Tierra Miel NO tiene
-  tienda física abierta al público - tenemos nuestro laboratorio y bodega, pero son de uso
-  interno, no atienden visitas. Buenas noticias: estamos construyendo nuestro primer local
-  físico en Pichilemu, así que en algún momento vamos a poder recibir gente en persona. Mientras
-  tanto, todas las compras son por la tienda online (tierramiel.org) con despacho a todo Chile.
-  Respondelo con esa calidez, sin sonar como una negativa seca - es algo que ilusiona, no que
-  disculpa.
+- "¿Tienen tienda física / local / dónde los puedo visitar?": responde textualmente con este
+  mensaje (ajusta solo lo minimo para que fluya natural en la conversacion, no lo resumas ni lo
+  cambies de fondo):
+  "Por ahora no tenemos tienda física abierta al público — tenemos nuestro laboratorio y bodega,
+  pero son de uso interno. ¡Buena noticia! Estamos construyendo nuestro primer local en
+  Pichilemu, así que muy pronto vamos a poder recibirte en persona 🍯 Mientras tanto, puedes
+  comprar tranquil@ por nuestra tienda online con despacho a todo Chile."
 `;
 
 // ---------------------------------------------------------------------------
