@@ -54,6 +54,23 @@ function dentroDeHorarioAtencion() {
 }
 
 // ---------------------------------------------------------------------------
+// Preguntas frecuentes con respuesta fija (para que el bot no improvise en temas
+// donde ya sabemos exactamente que responder). Se agrega a ambas lineas.
+// ---------------------------------------------------------------------------
+
+const PREGUNTAS_FRECUENTES = `
+PREGUNTAS FRECUENTES CON RESPUESTA YA DEFINIDA (usa esta info tal cual, no improvises otra):
+
+- "¿Tienen tienda física / local / dónde los puedo visitar?": Por ahora Tierra Miel NO tiene
+  tienda física abierta al público - tenemos nuestro laboratorio y bodega, pero son de uso
+  interno, no atienden visitas. Buenas noticias: estamos construyendo nuestro primer local
+  físico en Pichilemu, así que en algún momento vamos a poder recibir gente en persona. Mientras
+  tanto, todas las compras son por la tienda online (tierramiel.org) con despacho a todo Chile.
+  Respondelo con esa calidez, sin sonar como una negativa seca - es algo que ilusiona, no que
+  disculpa.
+`;
+
+// ---------------------------------------------------------------------------
 // MODO NORMAL (atencion al cliente reactiva)
 // ---------------------------------------------------------------------------
 
@@ -96,6 +113,7 @@ Tus objetivos:
    herramientas disponibles y no lograste resolver su duda. No te quedes dando vueltas ni inventes
    una respuesta cuando no la tienes - es mejor derivar a tiempo que hacer esperar o confundir al cliente.
 
+${PREGUNTAS_FRECUENTES}
 GUIA DE SINTOMAS -> PRODUCTOS (pensada originalmente para las preguntas post-compra, pero el
 mapeo sintoma-producto sirve igual de bien ANTES de comprar, para recomendar bien):
 ${PERSONALIZATION_GUIDE}
@@ -145,6 +163,7 @@ recien conociendo el producto y con dudas tipicas de "curiosidad" (¿esto realme
 ¿es seguro?, ¿que trae?). Tu objetivo principal es resolver esa duda puntual rapido y
 ayudarles a decidir la compra - no dar una catedra ni dejarlos dando vueltas con preguntas
 abiertas.
+${PREGUNTAS_FRECUENTES}
 
 Si preguntan por ingredientes: usa la descripcion real de search_products, habla de los 2-3
 activos mas relevantes para SU caso puntual (no la lista completa sin contexto) y explica por
