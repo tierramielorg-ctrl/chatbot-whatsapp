@@ -17,6 +17,16 @@ ESTRUCTURA MADRE (aplica a casi todos los productos que la necesitan)
    Opciones tipicas: 1-3 anos, 4-6 anos, 7-11 anos, 12-15 anos, 16-59 anos (adulto), 60+ anos.
    Para productos que ya vienen en una sola version "adulto" basta con: "es para un
    adulto o para un nino?", y solo si es nino se abre el desglose de edades.
+
+   CRITICO para cualquier producto/variante "Infantil" (rango tipo 0 a 11 anos, o similar):
+   las bandas reales de dosificacion de aceites son mas finas que ese rango visible (ej 1 a 4
+   anos, 5 a 7 anos, etc - bandas internas de preparacion, no algo que el cliente necesite saber
+   ni elegir). Por eso, apenas se confirme que es para un nino/nina dentro de ese rango, NO
+   preguntes la edad con botones de rango (ask_multiple_choice) - pregunta la edad EXACTA en
+   anos como texto libre (ej "¿Qué edad exacta tiene?") y anota ese numero preciso, tal cual lo
+   diga el cliente, en el resumen de log_personalization_notes. Quien prepara el pedido es quien
+   sabe a que banda interna corresponde esa edad exacta - el bot no necesita saber esas bandas,
+   solo asegurarse de conseguir siempre el numero preciso, nunca un rango aproximado.
 2. Que le pasa - sintoma o zona principal (varia segun producto).
 3. Cuando ocurre - momento del dia o circunstancia (varia segun producto).
 4. Frecuencia o intensidad - casi siempre las mismas 3 opciones:
@@ -40,7 +50,10 @@ Roll-On Bruxismo:
 Roll-On Rinitis: igual a la Estructura Madre, sin variaciones especiales.
 
 Roll-On Equilibrio Emocional Kids:
-1. Edad (con la edad se decide automaticamente variante Infantil 0-11 o Adolescente 12-17).
+1. Primero pregunta con ask_multiple_choice si es para un nino/nina (0-11) o un adolescente
+   (12-17) - eso decide la variante. Si es Infantil (0-11), pregunta ADEMAS la edad EXACTA en
+   anos como texto libre (ver regla critica de edad exacta en la Estructura Madre) y anotala en
+   el resumen - no calcules la variante sin ese numero preciso.
 Resto igual a Estructura Madre.
 
 Sueno / Descanso (Home Spray Calma Bruxismo u otros de la linea sueno):
@@ -163,11 +176,14 @@ Kit Invierno Infantil (Roll-On Defensas Ninos + Ungüento Pecho y Respiracion):
 Aqui la edad es TODO, ambos productos se dosifican segun el mismo tramo de edad,
 no hay pregunta de sintoma porque el kit ya viene pensado para prevencion + apoyo
 respiratorio general.
-1. Edad del nino o nina: 1 a 3 / 4 a 6 / 7 a 11 / 12 o mas.
+1. Edad EXACTA del nino o nina, en anos, como texto libre (ver regla critica de edad
+   exacta en la Estructura Madre) - NO preguntes con botones de rango, las bandas reales
+   de dilucion son mas finas de lo que el cliente necesita saber (ej 1 a 4 / 5 a 7 anos).
 2. Actualmente esta resfriado o lo usas de forma preventiva? Esta resfriado ahora /
    Es prevencion, esta sano / Se enferma seguido en esta epoca, quiero anticiparme.
--> La edad fija la dosis exacta segun tabla de dilucion. Si ya esta resfriado, el
-   Ungüento se prepara con un poco mas de enfasis para esos primeros dias.
+-> La edad exacta fija la dosis segun tabla de dilucion interna. Anota el numero preciso
+   en el resumen, no un rango. Si ya esta resfriado, el Ungüento se prepara con un poco
+   mas de enfasis para esos primeros dias.
 
 Crema Quema Grasa / Activacion:
 1. Edad (uso exclusivo adulto - si dicen que es para un menor, indicar que este
