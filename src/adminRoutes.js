@@ -34,6 +34,20 @@ router.post("/api/conversations/:phone/resume", (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * Registra un mensaje que YA se mando por otra via (ej un script puntual que le
+ * habla directo a la API de Meta) sin volver a enviarlo - solo para que quede
+ * visible en el panel. Uso excepcional; lo normal es usar /reply, que manda y
+ * registra en un solo paso.
+ */
+router.post("/api/conversations/:phone/log", (req, res) => {
+  const { phone } = req.params;
+  const { text, name, direction } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ error: "Falta el texto del mensaje." });
+  conversationLog.logMessage(phone, direction === "in" ? "in" : "out", text, name);
+  res.json({ ok: true });
+});
+
 router.get("/", (_req, res) => {
   res.type("html").send(ADMIN_HTML);
 });
