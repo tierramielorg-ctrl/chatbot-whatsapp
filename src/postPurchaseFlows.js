@@ -18,6 +18,7 @@ const TEMPLATE_WELCOME = process.env.WHATSAPP_TEMPLATE_WELCOME || "tierra_miel_b
 const TEMPLATE_REVIEW = process.env.WHATSAPP_TEMPLATE_REVIEW || "tierra_miel_resena";
 const TEMPLATE_SORTEO = process.env.WHATSAPP_TEMPLATE_SORTEO || "tierra_miel_sorteo_ticket";
 const TEMPLATE_SEPTIEMBRE = process.env.WHATSAPP_TEMPLATE_SEPTIEMBRE || "tierra_miel_septiembre_regalo";
+const TEMPLATE_QUIEBRE_STOCK = process.env.WHATSAPP_TEMPLATE_QUIEBRE_STOCK || "tierra_miel_quiebre_stock";
 const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es";
 const REVIEW_DELAY_DAYS = Number(process.env.REVIEW_DELAY_DAYS) || 7;
 const DISCOUNT_CODE_REVIEW = process.env.DISCOUNT_CODE_REVIEW || "";
@@ -38,6 +39,15 @@ const CONTEST_END = new Date("2026-08-27T23:59:59-04:00");
 // codigo no lo hace por si solo.
 const SEPTIEMBRE_START = new Date("2026-09-01T00:00:00-04:00");
 const SEPTIEMBRE_END = new Date("2026-09-30T23:59:59-04:00");
+
+// ---- Aviso de quiebre de stock: Crema Quema Grasa / Kit Bienestar Digestivo ----
+// Pedidos nuevos creados entre el 24 y el 26 de septiembre de 2026 (hasta el sabado) que
+// incluyan alguno de estos 2 productos reciben, ademas del mensaje de bienvenida normal, un
+// aviso de que el despacho se atrasa por quiebre de stock y sale el lunes. Se espera que el
+// stock quede repuesto esta semana - despues del 26 este aviso deja de mandarse solo.
+const QUIEBRE_STOCK_START = new Date("2026-09-24T00:00:00-04:00");
+const QUIEBRE_STOCK_END = new Date("2026-09-26T23:59:59-04:00");
+const PRODUCTOS_QUIEBRE_STOCK = ["crema quema grasa", "kit bienestar digestivo"];
 
 /** Normaliza un telefono de Shopify (+56 9 1234 5678, etc) al formato que pide WhatsApp (sin +, sin espacios). */
 function normalizePhone(raw) {
@@ -196,6 +206,50 @@ async function sendSeptiembreGiftMessage(order) {
   }
 }
 
+function orderInQuiebreStockWindow(createdAt) {
+  if (!createdAt) return false;
+  const d = new Date(createdAt);
+  return d >= QUIEBRE_STOCK_START && d <= QUIEBRE_STOCK_END;
+}
+
+/**
+ * Aviso de quiebre de stock (Crema Quema Grasa / Kit Bienestar Digestivo): si el pedido
+ * es de la ventana 24-26 sept y trae alguno de esos productos, manda por WhatsApp el aviso
+ * de que el despacho se atrasa y sale el lunes. Plantilla nueva, puede tardar en aprobarse -
+ * el catchup scheduler reintenta solo mientras tanto. Idempotente via tag.
+ */
+async function sendQuiebreStockNotice(order) {
+  if (!orderInQuiebreStockWindow(order.createdAt)) return;
+  const tags = order.tags || [];
+  if (tags.includes("tm-quiebre-stock-enviado")) return;
+
+  const afectado = order.lineItems.some((li) =>
+    PRODUCTOS_QUIEBRE_STOCK.some((kw) => (li.title || "").toLowerCase().includes(kw))
+  );
+  if (!afectado) {
+    // Tag igual (sin mandar nada) para que el catchup no lo siga revisando cada 30 min.
+    await shopify.addOrderTags(order.id, ["tm-quiebre-stock-enviado"]).catch(() => {});
+    return;
+  }
+
+  const phone = normalizePhone(order.phone);
+  if (!phone) return;
+
+  const firstName = (order.customerName || "").split(" ")[0] || "";
+  const sent = await whatsapp.sendTemplateMessage(phone, TEMPLATE_QUIEBRE_STOCK, TEMPLATE_LANG, [firstName, order.name]);
+  if (sent) {
+    await shopify.addOrderTags(order.id, ["tm-quiebre-stock-enviado"]);
+    conversationLog.logMessage(phone, "out", `[Plantilla quiebre de stock] Aviso de atraso - Pedido ${order.name}.`, order.customerName);
+    await shopify.appendOrderNote(
+      order.id,
+      `WhatsApp bot ${new Date().toLocaleString("es-CL")}: aviso de atraso por quiebre de stock enviado a ${phone} - despacho comprometido para el lunes.`
+    ).catch((err) => console.error(`Pedido ${order.name}: error dejando nota de quiebre de stock:`, err));
+    console.log(`Pedido ${order.name}: aviso de quiebre de stock enviado a ${phone}.`);
+  } else {
+    console.log(`Pedido ${order.name}: la plantilla "${TEMPLATE_QUIEBRE_STOCK}" aun no esta aprobada (o fallo el envio) - se reintenta sola en el proximo scheduler.`);
+  }
+}
+
 /**
  * Se llama cuando llega el webhook orders/create (o orders/paid) de Shopify.
  * Si el pedido tiene productos que necesitan personalizacion, manda la plantilla
@@ -214,6 +268,9 @@ async function handleOrderCreated(orderPayload) {
   );
   await sendSeptiembreGiftMessage(order).catch((err) =>
     console.error(`Pedido ${order.name}: error en el aviso de regalo de septiembre:`, err)
+  );
+  await sendQuiebreStockNotice(order).catch((err) =>
+    console.error(`Pedido ${order.name}: error en el aviso de quiebre de stock:`, err)
   );
 
   const needsFlow = order.lineItems.some((li) => productNeedsPersonalization(li.title));
@@ -541,6 +598,37 @@ async function runSeptiembreCatchupScheduler() {
   }
 }
 
+/**
+ * Red de seguridad del aviso de quiebre de stock: reintenta el WhatsApp para pedidos de
+ * la ventana 24-26 sept que aun no lo tengan (ej. mientras Meta aprueba la plantilla).
+ * Se detiene sola despues del 26 de septiembre.
+ */
+async function runQuiebreStockCatchupScheduler() {
+  if (new Date() > QUIEBRE_STOCK_END) return;
+
+  let orders;
+  try {
+    orders = await shopify.findOrdersCreatedBetweenMissingTag(
+      QUIEBRE_STOCK_START.toISOString(),
+      QUIEBRE_STOCK_END.toISOString(),
+      "tm-quiebre-stock-enviado",
+      50
+    );
+  } catch (err) {
+    console.error("runQuiebreStockCatchupScheduler: error buscando pedidos sin aviso:", err);
+    return;
+  }
+  for (const { name } of orders) {
+    try {
+      const order = await shopify.getOrderForAutomation(name.replace("#", ""));
+      if (!order) continue;
+      await sendQuiebreStockNotice(order);
+    } catch (err) {
+      console.error(`runQuiebreStockCatchupScheduler: error reprocesando pedido ${name}:`, err);
+    }
+  }
+}
+
 module.exports = {
   handleOrderCreated,
   handleOrderUpdated,
@@ -549,6 +637,7 @@ module.exports = {
   runOrderCatchupScheduler,
   runContestCatchupScheduler,
   runSeptiembreCatchupScheduler,
+  runQuiebreStockCatchupScheduler,
   businessDaysForProvince,
   normalizePhone,
 };
