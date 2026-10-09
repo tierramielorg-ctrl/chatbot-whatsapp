@@ -125,26 +125,21 @@ Cremas de piel (Dermatitis, Piel Atopica, Psoriasis) - la edad es doble critica:
 no solo cambia el aceite, cambia la CONCENTRACION. Piel de nino = dosis mas baja
 siempre, sin excepcion.
 
-Dermatitis:
-1. Edad.
-2. Que notas mas en la piel? Resequedad / Irritacion-enrojecimiento / Picazon /
-   Una combinacion de varias.
-3. En que zona se presenta principalmente? Manos / Rostro / Cuerpo (brazos, piernas,
-   torso) / Varias zonas.
-4. Con que frecuencia o desde cuando te pasa? Ocasionalmente / Todo el ano de forma
-   constante / Principalmente cuando hace mucho frio o mucho sol / Aparecio hace poco
-   (ultimas 2-3 semanas) y no se ha ido.
--> Define la formula: "todo el ano constante" = formula mas suave para uso prolongado
-   diario. "Por frio/sol" o "aparecio hace poco" = version mas concentrada para un
-   brote puntual, uso intensivo acotado, no para meses seguidos.
-
-Piel Atopica: mismas 4 preguntas que Dermatitis (edad / que predomina: sequedad
-intensa, tirantez, picazon, sensibilidad-reacciona a todo / zona / frecuencia con
-las mismas 4 opciones de patron temporal). Mismo criterio de formula que Dermatitis.
-
-Psoriasis: mismas 4 preguntas (edad / que notas: resequedad, descamacion, picazon,
-irritacion / zona: codos-rodillas, cuero cabelludo, manos, varias zonas / mismo
-patron temporal de 4 opciones). Mismo criterio de formula.
+Dermatitis / Piel Atopica / Psoriasis (cremas y unguentos) - FLUJO BREVE, maximo 4
+preguntas, en este orden:
+1. Edad de quien lo usara (si es nino o nina, la edad EXACTA en anos - ver regla de edad
+   exacta en la Estructura Madre). Define la dosis/concentracion.
+2. ¿Tiene alguna alergia o sensibilidad conocida (a algun aceite, planta, fragancia o
+   ingrediente)? Opciones: No / Si (y si dice que si, pregunta en texto libre a que).
+3. ¿En que zona esta principalmente? Manos / Rostro / Cuerpo / Cuero cabelludo / Varias
+   zonas (en psoriasis suma Codos-rodillas). Si dice que es una zona puntual, anotalo
+   como "localizada".
+4. ¿Desde cuando o con que patron? Todo el ano constante / Brote reciente / Por frio o sol.
+-> Formula: "todo el ano constante" = version mas suave para uso diario prolongado.
+   "Brote reciente" o "por frio o sol" = version mas concentrada, uso acotado.
+-> Si declara alguna alergia, en el resumen de log_personalization_notes pon al inicio
+   "⚠️ ALERGIA: <a que>" para que quien prepara lo vea primero, y dile al cliente que el
+   equipo lo va a revisar antes de preparar su producto.
 
 Pie de Atleta (Gotario + Ungüento Antifungico):
 1. Edad.
@@ -260,10 +255,10 @@ Tierra Miel sepa exactamente que preparar. Despues manda un mensaje de cierre br
 confirmando que ya tienen todo lo necesario.
 `;
 
-// Regla acotada a pedido de Tierra Miel (11 ago 2026): SOLO los Roll-On
-// individuales y estos 2 kits especificos activan el flujo de preguntas.
-// Cremas, ungüentos, gotarios, tonicos y todo lo demas quedan fuera - para esos
-// el cliente recibe el mensaje de bienvenida normal, sin preguntas.
+// Que productos activan el flujo de preguntas (a pedido de Tierra Miel): los Roll-On,
+// los kits de bruxismo, rinitis e invierno, y desde oct 2026 las cremas y unguentos de
+// piel (dermatitis, atopica, psoriasis) con un flujo breve. El resto de cremas,
+// unguentos, tonicos, etc recibe solo la bienvenida normal.
 const PRODUCTS_NEEDING_FLOW = [
   "roll on",
   "roll-on",
@@ -271,6 +266,10 @@ const PRODUCTS_NEEDING_FLOW = [
   "chao rinitis", // "✓ Kit Bruxismo Natural..." y "ROLL ON..." ya calzan con "roll on" arriba;
   "kit bruxismo", // estas quedan explicitas por si cambian el titulo y pierden "roll on".
   "kit invierno",
+  "dermatitis",
+  "atopica",
+  "atópica",
+  "psoriasis",
 ];
 
 function productNeedsPersonalization(title) {
