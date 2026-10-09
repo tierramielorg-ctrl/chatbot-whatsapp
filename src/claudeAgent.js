@@ -238,9 +238,9 @@ const normalTools = [
     description:
       "Deriva la conversacion a Sebastian (equipo Tierra Miel) cuando el cliente lo pide explicitamente " +
       "(quiere hablar con una persona / con Sebastian / con el equipo) O cuando ya intentaste ayudar 1-2 " +
-      "veces y no lograste resolver la duda del cliente con las herramientas disponibles. Le manda un " +
-      "mensaje al cliente avisando que un miembro del equipo va a seguir la conversacion, con el horario " +
-      "de atencion real, y pausa las respuestas automaticas para que no se crucen con Sebastian. " +
+      "veces y no lograste resolver la duda del cliente con las herramientas disponibles. Le manda al " +
+      "cliente un link que abre un chat directo con el WhatsApp de Sebastian, con su consulta ya escrita, " +
+      "junto con el horario de atencion real. " +
       "No la uses para dudas normales que si puedes resolver con search_products/get_order_status.",
     input_schema: {
       type: "object",
@@ -250,8 +250,13 @@ const normalTools = [
           description:
             "Resumen breve y claro (1-2 frases) de por que se deriva: que pidio o necesitaba el cliente, y que se intento. Esto lo lee Sebastian, se especifico.",
         },
+        customer_message: {
+          type: "string",
+          description:
+            "Mensaje corto en primera persona que el cliente le va a enviar a Sebastian al tocar el link, con su consulta y numero de pedido si lo tiene. Ej: 'Hola Sebastián, consulto por el despacho de mi pedido #1393, lo compré el 21/9 y aún no sale.'",
+        },
       },
-      required: ["reason"],
+      required: ["reason", "customer_message"],
     },
   },
 ];
@@ -273,24 +278,27 @@ async function runNormalTool(name, input, whatsappPhone) {
     }
     case "escalate_to_human": {
       const phone = whatsappPhone;
+      // El cliente abre el chat con Sebastian desde su propio telefono: asi la conversacion
+      // le llega a Sebastian como un chat normal, sin depender de que el aviso del bot se
+      // entregue (WhatsApp bloquea texto libre a quien no escribio en las ultimas 24h).
+      const prefilled = (input.customer_message || "").trim() || "Hola Sebastián, vengo del chat de Tierra Miel y necesito ayuda.";
+      const link = `https://wa.me/${SEBASTIAN_PHONE}?text=${encodeURIComponent(prefilled)}`;
       const horarioMsg = dentroDeHorarioAtencion()
-        ? "En un rato más te escribe directo por acá 🙂"
-        : `Nuestro horario de atención es ${HORARIO_ATENCION} — apenas abramos te escribe directo por acá.`;
+        ? "Te responde a la brevedad 🙂"
+        : `Atiende ${HORARIO_ATENCION}, así que te responde apenas abra 🙂`;
       await whatsapp.sendTextMessage(
         phone,
-        `¡Perfecto! Le paso esto a Sebastián de nuestro equipo para que te ayude personalmente. ${horarioMsg}`
+        `Para que Sebastián de nuestro equipo te ayude personalmente, escríbele directo a su WhatsApp tocando este link (el mensaje ya va escrito, solo dale enviar):\n\n${link}\n\n${horarioMsg}`
       );
-      conversationLog.logMessage(phone, "out", `[Derivado a Sebastián] ${input.reason}`);
-      conversationLog.pause(phone);
+      conversationLog.logMessage(phone, "out", `[Derivado a Sebastián] ${input.reason}\nLink enviado al cliente: ${link}`);
 
-      // Aviso a Sebastian: intento por WhatsApp (best effort - si no le ha escrito
-      // al numero del bot en las ultimas 24h, Meta puede rechazarlo por no tener
-      // plantilla aprobada) y siempre por email (mas confiable, no depende de eso).
+      // Aviso a Sebastian: best effort por WhatsApp (puede no entregarse si no le ha
+      // escrito al numero del bot en las ultimas 24h) y por email.
       if (SEBASTIAN_PHONE) {
         await whatsapp
           .sendTextMessage(
             SEBASTIAN_PHONE,
-            `🔔 Cliente ${phone} necesita ayuda tuya en WhatsApp:\n${input.reason}\n\nRespóndele directo a ese número.`
+            `🔔 Cliente +${phone} necesita ayuda tuya:\n${input.reason}\n\nLe mandé un link para que te escriba directo a este WhatsApp.`
           )
           .catch((err) => console.error("escalate_to_human: no se pudo avisar a Sebastian por WhatsApp:", err));
       }
