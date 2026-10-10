@@ -569,6 +569,27 @@ async function handleMessage(phone, userText, meta = {}) {
 
   appendMessage(phone, "user", userText);
   const session = getSession(phone, origin);
+
+  // El modo vive en memoria: se pierde con cada deploy y despues de 6h sin actividad,
+  // y la apertura de preguntas suele salir de noche. Si el cliente responde despues,
+  // recuperamos la personalizacion pendiente desde los tags del pedido en Shopify.
+  if (session.mode === "normal" && origin === "main") {
+    try {
+      // Solo pedidos sin despachar: preguntar despues de enviado ya no sirve para prepararlo.
+      const pendingPersonalization = await shopify.findPendingFlowOrderForPhone(
+        phone,
+        "tm-personalizacion-enviada",
+        21,
+        " AND fulfillment_status:unfulfilled"
+      );
+      if (pendingPersonalization) {
+        setSessionMode(phone, "personalization", pendingPersonalization.id, pendingPersonalization.name);
+      }
+    } catch (err) {
+      console.error(`handleMessage: no se pudo revisar flujos pendientes para ${phone}:`, err);
+    }
+  }
+
   const messages = [...session.messages];
 
   let config;

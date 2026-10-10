@@ -407,7 +407,42 @@ async function findOrdersCreatedBetweenMissingTag(sinceISO, untilISO, missingTag
   return data.orders.edges.map(({ node }) => node);
 }
 
+/**
+ * Busca un pedido reciente con un flujo pendiente (tag ej. "tm-personalizacion-enviada",
+ * que se quita al completarse) cuyo telefono coincida con el de quien escribe. Compara
+ * los ultimos 9 digitos para no depender del formato (+56, espacios, etc).
+ */
+async function findPendingFlowOrderForPhone(phone, tag, days = 21, extraQuery = "") {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const query = `
+    query($q: String!) {
+      orders(first: 25, query: $q, sortKey: CREATED_AT, reverse: true) {
+        edges {
+          node {
+            id
+            name
+            phone
+            customer { phone }
+            shippingAddress { phone }
+            metafield(namespace: "tierra_miel", key: "personalization_phone") { value }
+          }
+        }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(query, { q: `tag:'${tag}' AND created_at:>'${since}'${extraQuery}` });
+  const last9 = (s) => (s || "").replace(/[^\d]/g, "").slice(-9);
+  const target = last9(phone);
+  if (target.length < 9) return null;
+  for (const { node } of data.orders.edges) {
+    const candidates = [node.metafield?.value, node.phone, node.customer?.phone, node.shippingAddress?.phone];
+    if (candidates.some((c) => c && last9(c) === target)) return { id: node.id, name: node.name };
+  }
+  return null;
+}
+
 module.exports = {
+  findPendingFlowOrderForPhone,
   findRecentOrdersMissingAutomation,
   findOrdersCreatedBetweenMissingTag,
   searchProducts,
