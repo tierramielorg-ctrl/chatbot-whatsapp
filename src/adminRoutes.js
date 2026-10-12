@@ -34,6 +34,11 @@ router.post("/api/conversations/:phone/resume", (req, res) => {
   res.json({ ok: true });
 });
 
+router.post("/api/conversations/:phone/pause", (req, res) => {
+  conversationLog.pause(req.params.phone);
+  res.json({ ok: true });
+});
+
 /**
  * Registra un mensaje que YA se mando por otra via (ej un script puntual que le
  * habla directo a la API de Meta) sin volver a enviarlo - solo para que quede
@@ -150,7 +155,7 @@ function renderChat(convo) {
   document.getElementById("chat").innerHTML = \`
     <div id="chat-header">
       <div><strong>\${convo.name || convo.phone}</strong><div style="font-size:0.8em;color:#888">\${convo.phone}</div></div>
-      <button class="btn-secondary" onclick="toggleResume('\${convo.phone}', \${convo.paused})">\${convo.paused ? '▶ Reanudar bot' : '⏸ Bot activo'}</button>
+      <button class="btn-secondary" onclick="toggleResume('\${convo.phone}', \${convo.paused})">\${convo.paused ? '▶ Reanudar bot' : '⏸ Pausar bot'}</button>
     </div>
     <div id="messages">
       \${convo.messages.map(m => \`
@@ -192,8 +197,8 @@ async function sendReply(phone) {
 }
 
 async function toggleResume(phone, isPaused) {
-  if (!isPaused) return; // "Bot activo" no es un boton de accion
-  await api("/admin/api/conversations/" + encodeURIComponent(phone) + "/resume", { method: "POST" });
+  const action = isPaused ? "/resume" : "/pause";
+  await api("/admin/api/conversations/" + encodeURIComponent(phone) + action, { method: "POST" });
   const convo = await api("/admin/api/conversations/" + encodeURIComponent(phone));
   renderChat(convo);
   loadList();

@@ -68,6 +68,17 @@ PREGUNTAS FRECUENTES CON RESPUESTA YA DEFINIDA (usa esta info tal cual, no impro
   pero son de uso interno. ¡Buena noticia! Estamos construyendo nuestro primer local en
   Pichilemu, así que muy pronto vamos a poder recibirte en persona 🍯 Mientras tanto, puedes
   comprar tranquil@ por nuestra tienda online con despacho a todo Chile."
+
+- "¿Cómo compro? / no sé comprar en la página / ¿me mandas un link de pago? / quiero
+  comprar por acá": ayudale a comprar sin que tenga que navegar la pagina. Confirma que
+  productos quiere (variante y cantidad), buscalos con search_products y usa
+  create_checkout_link para mandarle UN link que abre el pago con todo ya cargado en el
+  carro. Explicale en una linea: "Toca el link, completa tus datos de envío y paga ahí
+  mismo 🙂". No le pidas datos de tarjeta ni de pago por el chat, nunca.
+
+- "¿Puedo pagar por transferencia?": por ahora no tienes los datos bancarios cargados, no
+  los inventes. Ofrece el link de pago (create_checkout_link) como la forma mas rapida, y
+  si igual quiere transferir, derivalo con escalate_to_human.
 `;
 
 // ---------------------------------------------------------------------------
@@ -234,6 +245,32 @@ const normalTools = [
     },
   },
   {
+    name: "create_checkout_link",
+    description:
+      "Arma un link de pago: abre el checkout de tierramiel.org con los productos ya cargados en el carro, " +
+      "listo para pagar. Usalo cuando el cliente quiere comprar, no sabe como comprar en la pagina, o pide " +
+      "un link de pago. Los variantId salen de search_products (campo variantId del producto, o de la " +
+      "variante elegida si el producto tiene variantes). Confirma con el cliente productos, variante y " +
+      "cantidad antes de armarlo.",
+    input_schema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              variantId: { type: "string", description: "variantId devuelto por search_products" },
+              quantity: { type: "integer", description: "Cantidad (1 por defecto)" },
+            },
+            required: ["variantId"],
+          },
+        },
+      },
+      required: ["items"],
+    },
+  },
+  {
     name: "escalate_to_human",
     description:
       "Deriva la conversacion a Sebastian (equipo Tierra Miel) cuando el cliente lo pide explicitamente " +
@@ -275,6 +312,12 @@ async function runNormalTool(name, input, whatsappPhone) {
       const identifier = input.identifier || whatsappPhone;
       const orders = await shopify.getCustomerOrders(identifier);
       return orders.length ? orders : { message: "No se encontraron pedidos para ese cliente." };
+    }
+    case "create_checkout_link": {
+      const url = shopify.buildCheckoutLink(input.items);
+      return url
+        ? { url, note: "Comparte este link tal cual: abre el pago con los productos ya en el carro." }
+        : { error: "No se pudo armar el link: faltan variantId validos (buscalos con search_products)." };
     }
     case "escalate_to_human": {
       const phone = whatsappPhone;

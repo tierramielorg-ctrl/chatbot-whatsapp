@@ -5,6 +5,23 @@
 const STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
 const ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_API_TOKEN;
 const API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-10";
+// Dominio publico de la tienda (no el *.myshopify.com).
+const STORE_PUBLIC_URL = process.env.STORE_PUBLIC_URL || "https://tierramiel.org";
+
+/**
+ * Arma un link que abre el checkout de Shopify con estos productos ya en el carro
+ * (cart permalink). items: [{ variantId, quantity }]. Devuelve null si no hay items validos.
+ */
+function buildCheckoutLink(items) {
+  const parts = (items || [])
+    .map(({ variantId, quantity }) => {
+      const id = String(variantId || "").split("/").pop().replace(/[^\d]/g, "");
+      const qty = Math.max(1, Math.min(20, parseInt(quantity, 10) || 1));
+      return id ? `${id}:${qty}` : null;
+    })
+    .filter(Boolean);
+  return parts.length ? `${STORE_PUBLIC_URL}/cart/${parts.join(",")}` : null;
+}
 
 async function shopifyGraphQL(query, variables = {}) {
   if (!STORE_DOMAIN || !ADMIN_TOKEN) {
@@ -61,7 +78,7 @@ async function searchProducts(searchTerm, limit = 5) {
             }
             totalInventory
             variants(first: 10) {
-              edges { node { title price inventoryQuantity } }
+              edges { node { id title price inventoryQuantity } }
             }
           }
         }
@@ -79,27 +96,26 @@ async function searchProducts(searchTerm, limit = 5) {
             max.amount
           ).toLocaleString("es-CL")} ${min.currencyCode}`;
     const variants = node.variants.edges.map(({ node: v }) => ({
+      // ID numerico de la variante: lo usa create_checkout_link para armar el carro.
+      variantId: v.id.split("/").pop(),
       title: v.title,
       price: `${Number(v.price).toLocaleString("es-CL")} ${min.currencyCode}`,
       inStock: v.inventoryQuantity > 0,
     }));
+    const singleVariant = variants.length === 1 && variants[0].title === "Default Title";
     return {
       title: node.title,
       price: priceLabel,
       inStock: node.totalInventory > 0,
+      variantId: singleVariant ? variants[0].variantId : undefined,
       // Descripcion real de la ficha (sin HTML), para que el bot pueda responder
       // preguntas de detalle (ingredientes, variedad/floracion, modo de uso, etc)
       // en vez de solo precio y stock.
       description: node.description || null,
       // Solo variantes con nombre real (mas de 1, o no es "Default Title") - asi el
       // bot sabe que opciones/variedades tiene ese producto (ej Quillay/Multifloral/Ulmo).
-      variants:
-        variants.length > 1 || (variants[0] && variants[0].title !== "Default Title")
-          ? variants
-          : undefined,
-      url:
-        node.onlineStoreUrl ||
-        `https://${STORE_DOMAIN.replace(".myshopify.com", "")}.com/products/${node.handle}`,
+      variants: singleVariant ? undefined : variants,
+      url: node.onlineStoreUrl || `${STORE_PUBLIC_URL}/products/${node.handle}`,
     };
   });
 }
@@ -442,6 +458,7 @@ async function findPendingFlowOrderForPhone(phone, tag, days = 21, extraQuery = 
 }
 
 module.exports = {
+  buildCheckoutLink,
   findPendingFlowOrderForPhone,
   findRecentOrdersMissingAutomation,
   findOrdersCreatedBetweenMissingTag,
