@@ -34,6 +34,23 @@ router.post("/api/conversations/:phone/resume", (req, res) => {
   res.json({ ok: true });
 });
 
+// Prueba en vivo la conexion con la API de Claude (lo que genera las respuestas del bot).
+router.get("/api/diagnostics", async (_req, res) => {
+  const model = process.env.CLAUDE_MODEL || "claude-sonnet-5";
+  try {
+    const Anthropic = require("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const r = await client.messages.create({
+      model,
+      max_tokens: 10,
+      messages: [{ role: "user", content: "Responde solo: ok" }],
+    });
+    res.json({ ok: true, model, reply: r.content?.[0]?.text || null });
+  } catch (err) {
+    res.json({ ok: false, model, status: err?.status || null, error: String(err?.message || err) });
+  }
+});
+
 router.post("/api/conversations/:phone/pause", (req, res) => {
   conversationLog.pause(req.params.phone);
   res.json({ ok: true });

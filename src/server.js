@@ -98,9 +98,17 @@ app.post("/webhook", async (req, res) => {
     try {
       const message = whatsapp.parseIncomingMessage(req.body);
       if (message?.from) {
-        await whatsapp.sendTextMessage(
+        // Si el bot falla, el cliente igual recibe una via directa a una persona: un
+        // silencio total hace que piensen que es una estafa.
+        const fallback =
+          "¡Hola! Disculpa, en este momento no puedo responderte bien por acá 🙏 " +
+          "Escríbele directo a Sebastián de nuestro equipo y te ayuda personalmente: " +
+          `https://wa.me/${postPurchaseFlows.normalizePhone(process.env.SEBASTIAN_PHONE || "946409348")}`;
+        const sent = await whatsapp.sendTextMessage(message.from, fallback, message.phoneNumberId);
+        conversationLog.logMessage(
           message.from,
-          "Uy, tuve un problema técnico respondiéndote. ¿Puedes intentar de nuevo en un momento?"
+          "out",
+          `[Error del bot: ${String(err?.message || err).slice(0, 200)}] ${sent ? fallback : "(no se pudo enviar el aviso)"}`
         );
       }
     } catch {
