@@ -557,7 +557,9 @@ async function runToolUseLoop({ systemPrompt, tools, runTool, messages, ctx }) {
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
-      system: systemPrompt,
+      // Cache del prompt (herramientas + instrucciones, que son lo mas largo): en las
+      // vueltas siguientes dentro de 5 min se cobran al ~10% en vez de completas.
+      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       tools,
       messages,
     });
